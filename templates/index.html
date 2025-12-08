@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>{{ .title }}</title>
+</head>
+<body>
+  <h1>{{ .title }}</h1>
+
+  {{ if .error }}
+  <p style="color:red">{{ .error }}</p>
+  {{ end }}
+
+  {{ if .message }}
+  <p style="color:green">{{ .message }}</p>
+  {{ end }}
+
+  {{ if .result }}
+  <p>{{ .result }}</p>
+  {{ end }}
+
+  <h2>IP prüfen</h2>
+  <form method="post" action="/check">
+    <label>IP-Adresse:
+      <input type="text" name="ip">
+    </label>
+    <button type="submit">Prüfen</button>
+  </form>
+
+  <h2>Blocklist hochladen (.conf)</h2>
+  <form method="post" action="/upload" enctype="multipart/form-data">
+    <input type="file" name="file">
+    <button type="submit">Upload</button>
+  </form>
+</body>
+</html>
+

@@ -72,7 +72,7 @@ func ToBeCreated(path string) {
 	fmt.Print("shall I create it? (y|n) [n]: ")
 	fmt.Scanln(&anlegen)
 	if StringInSlice(anlegen, yes) {
-		if err := os.MkdirAll(path, 0750); err != nil && !os.IsExist(err) {
+		if err := os.MkdirAll(path, 0o750); err != nil && !os.IsExist(err) {
 			fmt.Println(err)
 		} else {
 			fmt.Println("OK, " + path + " successfully created")
