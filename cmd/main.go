@@ -8,13 +8,14 @@ import (
 	"os"
 
 	"github.com/SvenKethz/blv/internal/db"
-	"github.com/SvenKethz/blv/internal/web"
+	"github.com/SvenKethz/blv/internal/utils"
+	"github.com/SvenKethz/blv/internal/webserver"
 )
 
 var (
-	_, ApplicationName = SeparateFileFromPath(os.Args[0])
+	_, ApplicationName = utils.SeparateFileFromPath(os.Args[0])
 	configPath         = flag.String("c", "/etc/blv/conf.d/blv.yml", "use -c to provide a custom path to the config file")
-	config             ApplicationConfig
+	config             utils.ApplicationConfig
 	LogIt              *slog.Logger
 	reset              = flag.Bool("init", false, "Neuaufbau der Datenbank erzwingen")
 )
@@ -22,11 +23,17 @@ var (
 func main() {
 	flag.Parse()
 
+	config.Initialize(configPath)
+	// now setup logging
+	LogIt = utils.SetupLogging(config.Logcfg)
+	fmt.Println("LogLevel is set to " + config.Logcfg.LogLevel)
+	fmt.Println("will log to", config.Logcfg.LogFolder)
+
 	if *reset {
-		_ = os.Remove(*dbPath)
+		_ = os.Remove(*config.dbPath)
 	}
 
-	database, err := db.Open(*dbPath)
+	database, err := db.Open(*config.dbPath)
 	if err != nil {
 		log.Fatalf("Fehler beim Öffnen der Datenbank: %v", err)
 	}
@@ -36,11 +43,10 @@ func main() {
 		log.Fatalf("Fehler beim Erstellen der Tabellen: %v", err)
 	}
 
-	r := web.NewRouter(database)
-	addr := fmt.Sprintf(":%d", *port)
+	r := webserver.NewRouter(database)
+	addr := fmt.Sprintf(":%d", *config.webPort)
 	log.Printf("Starte Webserver auf %s ...", addr)
 	if err := r.Run(addr); err != nil {
 		log.Fatalf("Fehler beim Starten des Servers: %v", err)
 	}
 }
-

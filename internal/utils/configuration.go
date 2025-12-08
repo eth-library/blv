@@ -12,17 +12,15 @@ import (
 // ========================
 
 type ApplicationConfig struct {
-	dbPath          string    `yaml:"dbPath"`
-	webPort        string    `yaml:"webPort"`
-	Logcfg              LogConfig `yaml:"LogConfig"`
+	dbPath  string    `yaml:"dbPath"`
+	webPort int       `yaml:"webPort"`
+	Logcfg  LogConfig `yaml:"LogConfig"`
 }
 
 type LogConfig struct {
 	LogLevel  string `yaml:"LogLevel"`
 	LogFolder string `yaml:"LogFolder"`
 }
-
-// ToDo: standardize logfile layout according to https://httpd.apache.org/docs/2.4/mod/mod_log_config.html#formats
 
 func (config *ApplicationConfig) Initialize(configPath *string) {
 	// 1. set defaults
@@ -43,10 +41,8 @@ func (config *ApplicationConfig) Initialize(configPath *string) {
 
 func (config *ApplicationConfig) setDefaults() {
 	*config = ApplicationConfig{
-		DateLayout:   "02/Jan/2006:15:04:05 -0700",
-		OutputFolder: "./output/",
-		LogType:      "apache",
-		LogFormat:    "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\"",
+		dbPath:  "/opt/blv/blv.db",
+		webPort: 8080,
 		Logcfg: LogConfig{
 			LogLevel:  "INFO",
 			LogFolder: "./logs/",
@@ -60,11 +56,6 @@ func (c *ApplicationConfig) CheckConfig() {
 	// check if the log folder exists
 	if !CheckIfDir(c.Logcfg.LogFolder) {
 		ToBeCreated(c.Logcfg.LogFolder)
-	}
-	checknaddtrailingslash(&c.OutputFolder)
-	// check if the output folder exists
-	if !CheckIfDir(c.OutputFolder) {
-		ToBeCreated(c.OutputFolder)
 	}
 }
 
