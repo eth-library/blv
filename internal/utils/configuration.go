@@ -12,8 +12,8 @@ import (
 // ========================
 
 type ApplicationConfig struct {
-	dbPath  string    `yaml:"dbPath"`
-	webPort int       `yaml:"webPort"`
+	DbPath  string    `yaml:"dbPath"`
+	WebPort int       `yaml:"webPort"`
 	Logcfg  LogConfig `yaml:"LogConfig"`
 }
 
@@ -41,8 +41,8 @@ func (config *ApplicationConfig) Initialize(configPath *string) {
 
 func (config *ApplicationConfig) setDefaults() {
 	*config = ApplicationConfig{
-		dbPath:  "/opt/blv/blv.db",
-		webPort: 8080,
+		DbPath:  "/opt/blv/blv.db",
+		WebPort: 8080,
 		Logcfg: LogConfig{
 			LogLevel:  "INFO",
 			LogFolder: "./logs/",

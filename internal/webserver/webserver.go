@@ -131,7 +131,7 @@ func NewRouter(database *sql.DB) *gin.Engine {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid IP"})
 				return
 			}
-			ipUint := netutil.IPToUint32(parsed)
+			ipUint := utils.IPToUint32(parsed)
 			if ipUint == 0 {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "IP could not be converted"})
 				return

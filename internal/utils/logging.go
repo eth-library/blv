@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func SetupLogging(logcfg LogConfig) *slog.Logger {
+func SetupLogging(logcfg LogConfig, ApplicationName string) *slog.Logger {
 	// filename := ApplicationName + ".log"
 	filename := ApplicationName + "_" + time.Now().Format("20060102_150405") + ".log"
 	if logcfg.LogFolder == "" {
@@ -47,7 +47,7 @@ func SetupLogging(logcfg LogConfig) *slog.Logger {
 	}
 	logSource := false
 	logLevel := new(slog.LevelVar)
-	logFile, err := os.OpenFile(logcfg.LogFolder+filename, os.O_CREATE|os.O_WRONLY, 0666)
+	logFile, err := os.OpenFile(logcfg.LogFolder+filename, os.O_CREATE|os.O_WRONLY, 0o666)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)

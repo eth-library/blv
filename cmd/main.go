@@ -23,17 +23,18 @@ var (
 func main() {
 	flag.Parse()
 
+	fmt.Println("starting ", ApplicationName)
 	config.Initialize(configPath)
 	// now setup logging
-	LogIt = utils.SetupLogging(config.Logcfg)
+	LogIt = utils.SetupLogging(config.Logcfg, ApplicationName)
 	fmt.Println("LogLevel is set to " + config.Logcfg.LogLevel)
 	fmt.Println("will log to", config.Logcfg.LogFolder)
 
 	if *reset {
-		_ = os.Remove(*config.dbPath)
+		_ = os.Remove(config.DbPath)
 	}
 
-	database, err := db.Open(*config.dbPath)
+	database, err := db.Open(config.DbPath)
 	if err != nil {
 		log.Fatalf("Fehler beim Öffnen der Datenbank: %v", err)
 	}
@@ -44,7 +45,7 @@ func main() {
 	}
 
 	r := webserver.NewRouter(database)
-	addr := fmt.Sprintf(":%d", *config.webPort)
+	addr := fmt.Sprintf(":%d", config.WebPort)
 	log.Printf("Starte Webserver auf %s ...", addr)
 	if err := r.Run(addr); err != nil {
 		log.Fatalf("Fehler beim Starten des Servers: %v", err)
