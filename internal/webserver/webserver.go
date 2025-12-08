@@ -103,10 +103,13 @@ func NewRouter(database *sql.DB) *gin.Engine {
 			})
 			return
 		}
+		errCode := c.Query("err")
+
 		c.HTML(http.StatusOK, "pool_detail.html", gin.H{
 			"title":   "Pool " + poolName,
 			"pool":    poolName,
 			"entries": entries,
+			"error":   errCode,
 		})
 	})
 
@@ -120,7 +123,7 @@ func NewRouter(database *sql.DB) *gin.Engine {
 			return
 		}
 		if err := db.InsertPool(database, cidr, poolName, comment); err != nil {
-			c.Redirect(http.StatusSeeOther, "/pools/"+poolName+"?err=insert_failed")
+			c.Redirect(http.StatusSeeOther, "/pools/"+poolName+"?err="+err.Error())
 			return
 		}
 		c.Redirect(http.StatusSeeOther, "/pools/"+poolName)

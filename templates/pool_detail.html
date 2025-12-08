@@ -8,7 +8,7 @@
   <h1>{{ .title }}</h1>
 
   {{ if .error }}
-  <p style="color:red">{{ .error }}</p>
+  <p style="color:red">FEHLER: {{ .error }}</p>
   {{ end }}
 
   <h2>Einträge in Pool "{{ .pool }}"</h2>
