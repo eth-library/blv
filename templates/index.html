@@ -3,35 +3,43 @@
 <head>
   <meta charset="utf-8">
   <title>{{ .title }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <h1>{{ .title }}</h1>
+  <header>
+    <div class="container">
+      <h1>{{ .title }}</h1>
+    </div>
+  </header>
 
-  {{ if .error }}
-  <p style="color:red">{{ .error }}</p>
-  {{ end }}
+  <main>
+    <div class="container">
+      <section class="status">
+        {{ if .error }}
+        <div class="alert alert-error">{{ .error }}</div>
+        {{ end }}
 
-  {{ if .message }}
-  <p style="color:green">{{ .message }}</p>
-  {{ end }}
+        {{ if .message }}
+        <div class="alert alert-success">{{ .message }}</div>
+        {{ end }}
 
-  {{ if .result }}
-  <p>{{ .result }}</p>
-  {{ end }}
+        {{ if .result }}
+        <div class="alert alert-info">{{ .result }}</div>
+        {{ end }}
+      </section>
 
-  <h2>IP prüfen</h2>
-  <form method="post" action="/check">
-    <label>IP-Adresse:
-      <input type="text" name="ip">
-    </label>
-    <button type="submit">Prüfen</button>
-  </form>
-
-  <h2>Blocklist hochladen (.conf)</h2>
-  <form method="post" action="/upload" enctype="multipart/form-data">
-    <input type="file" name="file">
-    <button type="submit">Upload</button>
-  </form>
+        <section class="card">
+          <h2>IP-Adresse prüfen</h2>
+          <form method="post" action="/check" novalidate>
+            <div class="field-group">
+              <label for="ip">IP-Adresse</label>
+              <input type="text" id="ip" name="ip" autocomplete="off" placeholder="z. B. 192.0.2.1">
+            </div>
+            <button type="submit">Prüfen</button>
+          </form>
+      </section>
+    </div>
+  </main>
 </body>
 </html>
-

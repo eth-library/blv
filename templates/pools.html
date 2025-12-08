@@ -3,23 +3,57 @@
 <head>
   <meta charset="utf-8">
   <title>{{ .title }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-  <h1>{{ .title }}</h1>
+  <header>
+    <div class="container">
+      <h1>{{ .title }}</h1>
+    </div>
+  </header>
 
-  {{ if .error }}
-  <p style="color:red">{{ .error }}</p>
-  {{ end }}
+  <main>
+    <div class="container">
+      <section class="card">
+        <p><a href="/" class="link-back">Zurück zur Startseite</a></p>
+      </section>
 
-  <ul>
-    {{ range .pools }}
-      <li><a href="/pools/{{ . }}">{{ . }}</a></li>
-    {{ else }}
-      <li>Keine Pools vorhanden.</li>
-    {{ end }}
-  </ul>
+      {{ if .error }}
+      <section class="status">
+        <div class="alert alert-error">{{ .error }}</div>
+      </section>
+      {{ end }}
 
-  <p><a href="/">Zurück zur Startseite</a></p>
+      <section class="card">
+        <h2>Verfügbare Pools</h2>
+
+        <ul class="item-list">
+          {{ range .pools }}
+          <li>
+            <a href="/pools/{{ . }}" class="link-item">{{ . }}</a>
+          </li>
+          {{ else }}
+          <li class="item-empty">Keine Pools vorhanden.</li>
+          {{ end }}
+        </ul>
+      </section>
+        <section class="card">
+          <h2>Blockliste hochladen</h2>
+          <p class="hint">Unterstütztes Format: Konfigurationsdatei mit IP-Einträgen (.conf)</p>
+          <form method="post" action="/upload" enctype="multipart/form-data">
+            <div class="field-group">
+              <label for="file">Datei auswählen</label>
+              <input type="file" id="file" name="file" accept=".conf">
+            </div>
+            <button type="submit">Hochladen</button>
+          </form>
+        </div>
+      </section>
+
+
+    </div>
+  </main>
 </body>
 </html>
 

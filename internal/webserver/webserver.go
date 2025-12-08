@@ -18,6 +18,8 @@ import (
 func NewRouter(database *sql.DB) *gin.Engine {
 	r := gin.Default()
 	r.LoadHTMLGlob("templates/*.html")
+	// Statische Dateien bereitstellen
+	r.Static("/static", "./static")
 
 	// HTML: Startseite mit Formularen
 	r.GET("/", func(c *gin.Context) {
