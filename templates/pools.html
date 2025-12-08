@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>{{ .title }}</title>
+</head>
+<body>
+  <h1>{{ .title }}</h1>
+
+  {{ if .error }}
+  <p style="color:red">{{ .error }}</p>
+  {{ end }}
+
+  <ul>
+    {{ range .pools }}
+      <li><a href="/pools/{{ . }}">{{ . }}</a></li>
+    {{ else }}
+      <li>Keine Pools vorhanden.</li>
+    {{ end }}
+  </ul>
+
+  <p><a href="/">Zurück zur Startseite</a></p>
+</body>
+</html>
+

@@ -22,12 +22,23 @@ func ImportConf(database *sql.DB, r io.Reader, poolName string) (int, error) {
 		if !strings.HasPrefix(line, "Require not ip") {
 			continue
 		}
+
+		// Kommentar abtrennen
+		var comment string
+		if idx := strings.Index(line, "#"); idx != -1 {
+			comment = strings.TrimSpace(line[idx+1:])
+			if len(comment) > 60 {
+				comment = comment[:60]
+			}
+			line = strings.TrimSpace(line[:idx])
+		}
+
 		parts := strings.Fields(line)
 		if len(parts) < 4 {
 			continue
 		}
 		cidr := parts[3]
-		if err := db.InsertPool(database, cidr, poolName); err != nil {
+		if err := db.InsertPool(database, cidr, poolName, comment); err != nil {
 			return imported, fmt.Errorf("Fehler beim Import von %s: %w", cidr, err)
 		}
 		imported++

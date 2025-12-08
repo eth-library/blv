@@ -72,8 +72,68 @@ func NewRouter(database *sql.DB) *gin.Engine {
 
 		c.HTML(http.StatusOK, "index.html", gin.H{
 			"title":  "IP Blocklist Manager",
-			"result": fmt.Sprintf("IP %s ist geblockt in Pool '%s' (CIDR: %s).", ipStr, p.Name, p.CIDR),
+			"result": fmt.Sprintf("IP %s ist geblockt in Pool '%s' (CIDR: %s). Kommentar: %s", ipStr, p.Name, p.CIDR, p.Comment.String),
 		})
+	})
+
+	// Übersicht aller Pools
+	r.GET("/pools", func(c *gin.Context) {
+		names, err := db.ListPoolNames(database)
+		if err != nil {
+			c.HTML(http.StatusInternalServerError, "pools.html", gin.H{
+				"title": "Pools",
+				"error": fmt.Sprintf("Fehler beim Laden der Pools: %v", err),
+			})
+			return
+		}
+		c.HTML(http.StatusOK, "pools.html", gin.H{
+			"title": "Pools",
+			"pools": names,
+		})
+	})
+
+	// Detailseite für einen Pool
+	r.GET("/pools/:name", func(c *gin.Context) {
+		poolName := c.Param("name")
+		entries, err := db.ListByPool(database, poolName)
+		if err != nil {
+			c.HTML(http.StatusInternalServerError, "pool_detail.html", gin.H{
+				"title": "Pool " + poolName,
+				"error": fmt.Sprintf("Fehler beim Laden des Pools: %v", err),
+			})
+			return
+		}
+		c.HTML(http.StatusOK, "pool_detail.html", gin.H{
+			"title":   "Pool " + poolName,
+			"pool":    poolName,
+			"entries": entries,
+		})
+	})
+
+	// Eintrag hinzufügen
+	r.POST("/pools/:name/add", func(c *gin.Context) {
+		poolName := c.Param("name")
+		cidr := strings.TrimSpace(c.PostForm("cidr"))
+		comment := strings.TrimSpace(c.PostForm("comment"))
+		if cidr == "" {
+			c.Redirect(http.StatusSeeOther, "/pools/"+poolName+"?err=cidr_empty")
+			return
+		}
+		if err := db.InsertPool(database, cidr, poolName, comment); err != nil {
+			c.Redirect(http.StatusSeeOther, "/pools/"+poolName+"?err=insert_failed")
+			return
+		}
+		c.Redirect(http.StatusSeeOther, "/pools/"+poolName)
+	})
+
+	// Eintrag löschen
+	r.POST("/pools/:name/delete", func(c *gin.Context) {
+		poolName := c.Param("name")
+		cidr := c.PostForm("cidr")
+		if cidr != "" {
+			_ = db.DeleteByPoolAndCIDR(database, poolName, cidr)
+		}
+		c.Redirect(http.StatusSeeOther, "/pools/"+poolName)
 	})
 
 	// HTML: Upload einer *.conf mit ImportConf
@@ -150,7 +210,27 @@ func NewRouter(database *sql.DB) *gin.Engine {
 				"blocked": true,
 				"pool":    p.Name,
 				"cidr":    p.CIDR,
+				"comment": p.Comment,
 			})
+		})
+		api.POST("/add", func(c *gin.Context) {
+			var req struct {
+				CIDR    string `json:"cidr"`
+				Name    string `json:"name"`
+				Comment string `json:"comment"`
+			}
+			if err := c.ShouldBindJSON(&req); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
+				return
+			}
+			if req.Name == "" {
+				req.Name = "default"
+			}
+			if err := db.InsertPool(database, req.CIDR, req.Name, req.Comment); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"status": "added"})
 		})
 	}
 

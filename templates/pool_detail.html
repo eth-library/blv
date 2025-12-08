@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>{{ .title }}</title>
+</head>
+<body>
+  <h1>{{ .title }}</h1>
+
+  {{ if .error }}
+  <p style="color:red">{{ .error }}</p>
+  {{ end }}
+
+  <h2>Einträge in Pool "{{ .pool }}"</h2>
+  <table border="1" cellpadding="4">
+    <tr>
+      <th>CIDR</th>
+      <th>Kommentar</th>
+      <th>Aktion</th>
+    </tr>
+    {{ range .entries }}
+      <tr>
+        <td>{{ .CIDR }}</td>
+        <td>{{ .CommentString }}</td>
+        <td>
+          <form method="post" action="/pools/{{ $.pool }}/delete" style="display:inline">
+            <input type="hidden" name="cidr" value="{{ .CIDR }}">
+            <button type="submit">Löschen</button>
+          </form>
+        </td>
+      </tr>
+    {{ else }}
+      <tr><td colspan="2">Keine Einträge vorhanden.</td></tr>
+    {{ end }}
+  </table>
+
+  <h3>Neuen CIDR hinzufügen</h3>
+  <form method="post" action="/pools/{{ .pool }}/add">
+    <label>CIDR:
+      <input type="text" name="cidr" placeholder="z.B. 192.168.1.0/24">
+    </label><br>
+    <label>Kommentar (max. 60 Zeichen):
+      <input type="text" name="comment" maxlength="60">
+    </label><br>
+    <button type="submit">Hinzufügen</button>
+  </form>
+
+  <p><a href="/pools">Zurück zur Poolübersicht</a></p>
+  <p><a href="/">Zurück zur Startseite</a></p>
+</body>
+</html>
+
