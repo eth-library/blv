@@ -1,4 +1,4 @@
 eth-lists
-internal/.DS_Store
-.DS_Store
+*.DS_Store
 ip_manager.db
+logs
