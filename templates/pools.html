@@ -65,9 +65,14 @@
             </div>
             <button type="submit">Hochladen</button>
           </form>
-        </div>
       </section>
-
+        <section class="card">
+          <h2>reset DB</h2>
+          <form method="post" action="/reset" onsubmit="return confirm('Das löscht die gesamte Datenbank! Sicher?');">
+            <button type="submit">RESET</button>
+          </form>
+      </section>
+</div>
 
     </div>
   </main>

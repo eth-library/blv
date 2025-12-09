@@ -4,48 +4,56 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"log/slog"
 	"os"
 
+	app "github.com/SvenKethz/blv/internal/configuration"
 	"github.com/SvenKethz/blv/internal/db"
-	"github.com/SvenKethz/blv/internal/utils"
+	"github.com/SvenKethz/blv/internal/functions"
+	"github.com/SvenKethz/blv/internal/helpers"
 	"github.com/SvenKethz/blv/internal/webserver"
 )
 
 var (
-	_, ApplicationName = utils.SeparateFileFromPath(os.Args[0])
-	configPath         = flag.String("c", "/etc/blv/conf.d/blv.yml", "use -c to provide a custom path to the config file")
-	config             utils.ApplicationConfig
-	LogIt              *slog.Logger
-	reset              = flag.Bool("init", false, "Neuaufbau der Datenbank erzwingen")
+	_, ApplicationName = helpers.SeparateFileFromPath(os.Args[0])
+	ConfigPath         = flag.String("c", "/etc/blv/conf.d/blv.yml", "use -c to provide a custom path to the config file")
+	DBinit             = flag.Bool("init", false, "Neuaufbau der Datenbank erzwingen")
+	Reset              = flag.Bool("reset", false, "Neuaufbau der Datenbank erzwingen")
 )
 
 func main() {
 	flag.Parse()
 
 	fmt.Println("starting ", ApplicationName)
-	config.Initialize(configPath)
+	app.Initialize(ApplicationName, *ConfigPath)
 	// now setup logging
-	LogIt = utils.SetupLogging(config.Logcfg, ApplicationName)
-	fmt.Println("LogLevel is set to " + config.Logcfg.LogLevel)
-	fmt.Println("will log to", config.Logcfg.LogFolder)
+	fmt.Println("LogLevel is set to " + app.Config.Logcfg.LogLevel)
+	fmt.Println("will log to", app.Config.Logcfg.LogFolder)
 
-	if *reset {
-		_ = os.Remove(config.DbPath)
-	}
-
-	database, err := db.Open(config.DbPath)
+	app.LogIt.Info(ApplicationName + " starting")
+	database, err := db.Open(app.Config.DbPath)
 	if err != nil {
-		log.Fatalf("Fehler beim Öffnen der Datenbank: %v", err)
+		app.LogIt.Error("Fehler beim Öffnen der Datenbank: %v", err)
 	}
 	defer database.Close()
+
+	if *Reset {
+		functions.ExportDB(database)
+		err := db.CleanDB(database)
+		if err != nil {
+			app.LogIt.Error("Fehler beim Putzen der Datenbank: %v", err)
+		}
+		err = db.CreateTables(database)
+		if err != nil {
+			app.LogIt.Error("Fehler beim Anlegen der Datenbank: %v", err)
+		}
+	}
 
 	if err := db.CreateTables(database); err != nil {
 		log.Fatalf("Fehler beim Erstellen der Tabellen: %v", err)
 	}
 
 	r := webserver.NewRouter(database)
-	addr := fmt.Sprintf(":%d", config.WebPort)
+	addr := fmt.Sprintf(":%d", app.Config.WebPort)
 	log.Printf("Starte Webserver auf %s ...", addr)
 	if err := r.Run(addr); err != nil {
 		log.Fatalf("Fehler beim Starten des Servers: %v", err)

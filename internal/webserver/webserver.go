@@ -12,7 +12,7 @@ import (
 
 	"github.com/SvenKethz/blv/internal/db"
 	"github.com/SvenKethz/blv/internal/functions"
-	"github.com/SvenKethz/blv/internal/utils"
+	"github.com/SvenKethz/blv/internal/helpers"
 )
 
 func NewRouter(database *sql.DB) *gin.Engine {
@@ -46,7 +46,7 @@ func NewRouter(database *sql.DB) *gin.Engine {
 			})
 			return
 		}
-		ipUint := utils.IPToUint32(parsed)
+		ipUint := helpers.IPToUint32(parsed)
 		if ipUint == 0 {
 			c.HTML(http.StatusBadRequest, "index.html", gin.H{
 				"title": "IP Blocklist Manager",
@@ -77,6 +77,12 @@ func NewRouter(database *sql.DB) *gin.Engine {
 			"result":   fmt.Sprintf("IP %s ist geblockt (CIDR: %s).", ipStr, p.CIDR),
 			"poolName": p.Name,
 			"comment":  p.CommentString(),
+		})
+	})
+	r.POST("/reset", func(c *gin.Context) {
+		err := functions.ResetDB(database)
+		c.HTML(http.StatusSeeOther, "pools.html", gin.H{
+			"error": err,
 		})
 	})
 

@@ -1,4 +1,4 @@
-package utils
+package helpers
 
 import (
 	"bufio"
@@ -44,7 +44,7 @@ func GetCleanPath(path string) string {
 	return filepath.Clean(path)
 }
 
-func checknaddtrailingslash(path *string) {
+func Checknaddtrailingslash(path *string) {
 	if !strings.HasSuffix(*path, "/") {
 		*path = *path + "/"
 	}

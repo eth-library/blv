@@ -6,7 +6,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/SvenKethz/blv/internal/utils"
+	"github.com/SvenKethz/blv/internal/helpers"
 )
 
 type Pool struct {
@@ -46,11 +46,20 @@ func CreateTables(db *sql.DB) error {
 	return err
 }
 
+func CleanDB(db *sql.DB) error {
+	const sqlStmt = `
+    DROP TABLE IF EXISTS pools;
+    DROP INDEX IF EXISTS idx_ip_range;
+    `
+	_, err := db.Exec(sqlStmt)
+	return err
+}
+
 func InsertPool(dbConn *sql.DB, cidrString, name string, comment string) error {
 	if len(comment) > 60 {
 		comment = comment[:60]
 	}
-	startIP, endIP, err := utils.GetIPRange(cidrString)
+	startIP, endIP, err := helpers.GetIPRange(cidrString)
 	if err != nil {
 		return fmt.Errorf("ungültiger CIDR %s: %w", cidrString, err)
 	}
@@ -130,8 +139,6 @@ func DeleteByPoolAndCIDR(dbConn *sql.DB, poolName, cidr string) error {
 
 // Einen Pool löschen
 func DeletePool(dbConn *sql.DB, poolName string) error {
-	fmt.Println("trying to delete Pool ", poolName)
-	r, err := dbConn.Exec(`DELETE FROM pools WHERE name = ?`, poolName)
-	fmt.Println("deleted ", r, " from ", poolName)
+	_, err := dbConn.Exec(`DELETE FROM pools WHERE name = ?`, poolName)
 	return err
 }
