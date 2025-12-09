@@ -127,3 +127,11 @@ func DeleteByPoolAndCIDR(dbConn *sql.DB, poolName, cidr string) error {
 	_, err := dbConn.Exec(`DELETE FROM pools WHERE name = ? AND cidr = ?`, poolName, cidr)
 	return err
 }
+
+// Einen Pool löschen
+func DeletePool(dbConn *sql.DB, poolName string) error {
+	fmt.Println("trying to delete Pool ", poolName)
+	r, err := dbConn.Exec(`DELETE FROM pools WHERE name = ?`, poolName)
+	fmt.Println("deleted ", r, " from ", poolName)
+	return err
+}

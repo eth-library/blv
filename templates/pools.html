@@ -28,20 +28,37 @@
       <section class="card">
         <h2>Verfügbare Pools</h2>
 
-        <ul class="item-list">
-          {{ range .pools }}
-          <li>
-            <a href="/pools/{{ . }}" class="link-item">{{ . }}</a>
-          </li>
-          {{ else }}
-          <li class="item-empty">Keine Pools vorhanden.</li>
-          {{ end }}
-        </ul>
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Pool Name</th>
+                <th scope="col">Aktion</th>
+              </tr>
+            </thead>
+            <tbody>
+            {{ range .pools }}
+              <tr>
+                <td><a href="/pools/{{ . }}" class="link-item">{{ . }}</a></td>
+                <td>
+                  <form method="post" action="/pools/{{ . }}/delete" onsubmit="return confirm('Das löscht den gesamten Pool! Sicher?');">
+                    <button type="submit" class="btn-danger">gesamten Pool Löschen</button>
+                  </form>
+                </td>
+              </tr>
+            {{ else }}
+              <tr>
+                <td colspan="2" class="table-empty">Keine Einträge vorhanden.</td>
+              </tr>
+            {{ end }}
+            </tbody>
+          </table>
+        </div>
       </section>
         <section class="card">
           <h2>Blockliste hochladen</h2>
           <p class="hint">Unterstütztes Format: Konfigurationsdatei mit IP-Einträgen (.conf)</p>
-          <form method="post" action="/upload" enctype="multipart/form-data">
+          <form method="post" action="/pools/upload" enctype="multipart/form-data">
             <div class="field-group">
               <label for="file">Datei auswählen</label>
               <input type="file" id="file" name="file" accept=".conf">

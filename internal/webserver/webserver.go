@@ -73,8 +73,10 @@ func NewRouter(database *sql.DB) *gin.Engine {
 		}
 
 		c.HTML(http.StatusOK, "index.html", gin.H{
-			"title":  "IP Blocklist Manager",
-			"result": fmt.Sprintf("IP %s ist geblockt in Pool '%s' (CIDR: %s). Kommentar: %s", ipStr, p.Name, p.CIDR, p.Comment.String),
+			"title":    "IP Blocklist Manager",
+			"result":   fmt.Sprintf("IP %s ist geblockt (CIDR: %s).", ipStr, p.CIDR),
+			"poolName": p.Name,
+			"comment":  p.CommentString(),
 		})
 	})
 
@@ -115,8 +117,14 @@ func NewRouter(database *sql.DB) *gin.Engine {
 		})
 	})
 
+	// Pool löschen
+	r.POST("/pools/:name/delete", func(c *gin.Context) {
+		poolName := c.Param("name")
+		_ = db.DeletePool(database, poolName)
+		c.Redirect(http.StatusSeeOther, "/pools/")
+	})
 	// Eintrag hinzufügen
-	r.POST("/pools/:name/add", func(c *gin.Context) {
+	r.POST("/pools/:name/addIP", func(c *gin.Context) {
 		poolName := c.Param("name")
 		cidr := strings.TrimSpace(c.PostForm("cidr"))
 		comment := strings.TrimSpace(c.PostForm("comment"))
@@ -132,7 +140,7 @@ func NewRouter(database *sql.DB) *gin.Engine {
 	})
 
 	// Eintrag löschen
-	r.POST("/pools/:name/delete", func(c *gin.Context) {
+	r.POST("/pools/:name/deleteIP", func(c *gin.Context) {
 		poolName := c.Param("name")
 		cidr := c.PostForm("cidr")
 		if cidr != "" {
@@ -142,7 +150,7 @@ func NewRouter(database *sql.DB) *gin.Engine {
 	})
 
 	// HTML: Upload einer *.conf mit ImportConf
-	r.POST("/upload", func(c *gin.Context) {
+	r.POST("/pools/upload", func(c *gin.Context) {
 		fileHeader, err := c.FormFile("file")
 		if err != nil {
 			c.HTML(http.StatusBadRequest, "index.html", gin.H{
@@ -183,61 +191,61 @@ func NewRouter(database *sql.DB) *gin.Engine {
 	})
 
 	// REST-API: IP prüfen (praktisch identisch zur HTML-Variante, aber JSON)
-	api := r.Group("/api")
-	{
-		api.GET("/check", func(c *gin.Context) {
-			ipStr := strings.TrimSpace(c.Query("ip"))
-			if ipStr == "" {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "ip parameter required"})
-				return
-			}
-			parsed := net.ParseIP(ipStr)
-			if parsed == nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid IP"})
-				return
-			}
-			ipUint := utils.IPToUint32(parsed)
-			if ipUint == 0 {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "IP could not be converted"})
-				return
-			}
-
-			p, err := db.FindPoolByIP(database, ipUint)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			if p == nil {
-				c.JSON(http.StatusOK, gin.H{"blocked": false})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{
-				"blocked": true,
-				"pool":    p.Name,
-				"cidr":    p.CIDR,
-				"comment": p.Comment,
-			})
-		})
-		api.POST("/add", func(c *gin.Context) {
-			var req struct {
-				CIDR    string `json:"cidr"`
-				Name    string `json:"name"`
-				Comment string `json:"comment"`
-			}
-			if err := c.ShouldBindJSON(&req); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
-				return
-			}
-			if req.Name == "" {
-				req.Name = "default"
-			}
-			if err := db.InsertPool(database, req.CIDR, req.Name, req.Comment); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"status": "added"})
-		})
-	}
+	// api := r.Group("/api")
+	// {
+	// 	api.GET("/check", func(c *gin.Context) {
+	// 		ipStr := strings.TrimSpace(c.Query("ip"))
+	// 		if ipStr == "" {
+	// 			c.JSON(http.StatusBadRequest, gin.H{"error": "ip parameter required"})
+	// 			return
+	// 		}
+	// 		parsed := net.ParseIP(ipStr)
+	// 		if parsed == nil {
+	// 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid IP"})
+	// 			return
+	// 		}
+	// 		ipUint := utils.IPToUint32(parsed)
+	// 		if ipUint == 0 {
+	// 			c.JSON(http.StatusBadRequest, gin.H{"error": "IP could not be converted"})
+	// 			return
+	// 		}
+	//
+	// 		p, err := db.FindPoolByIP(database, ipUint)
+	// 		if err != nil {
+	// 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// 			return
+	// 		}
+	// 		if p == nil {
+	// 			c.JSON(http.StatusOK, gin.H{"blocked": false})
+	// 			return
+	// 		}
+	// 		c.JSON(http.StatusOK, gin.H{
+	// 			"blocked": true,
+	// 			"pool":    p.Name,
+	// 			"cidr":    p.CIDR,
+	// 			"comment": p.Comment,
+	// 		})
+	// 	})
+	// 	api.POST("/add", func(c *gin.Context) {
+	// 		var req struct {
+	// 			CIDR    string `json:"cidr"`
+	// 			Name    string `json:"name"`
+	// 			Comment string `json:"comment"`
+	// 		}
+	// 		if err := c.ShouldBindJSON(&req); err != nil {
+	// 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid json"})
+	// 			return
+	// 		}
+	// 		if req.Name == "" {
+	// 			req.Name = "default"
+	// 		}
+	// 		if err := db.InsertPool(database, req.CIDR, req.Name, req.Comment); err != nil {
+	// 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	// 			return
+	// 		}
+	// 		c.JSON(http.StatusOK, gin.H{"status": "added"})
+	// 	})
+	// }
 
 	return r
 }

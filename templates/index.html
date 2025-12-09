@@ -25,7 +25,13 @@
         {{ end }}
 
         {{ if .result }}
-        <div class="alert alert-info">{{ .result }}</div>
+          <div class="alert alert-info">
+            <p>{{ .result }}</p>
+            {{ if .poolName }}
+              <p>Pool: <a href="/pools/{{ .poolName }}">{{ .poolName }}</a></p>
+              <p>Kommentar: {{ .comment }}</p>
+            {{ end }}
+          </div>
         {{ end }}
       </section>
 
