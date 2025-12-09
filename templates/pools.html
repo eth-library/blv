@@ -19,11 +19,25 @@
         <p><a href="/" class="link-back">Zurück zur Startseite</a></p>
       </section>
 
-      {{ if .error }}
       <section class="status">
+        {{ if .error }}
         <div class="alert alert-error">{{ .error }}</div>
+        {{ end }}
+
+        {{ if .message }}
+        <div class="alert alert-success">{{ .message }}</div>
+        {{ end }}
+
+        {{ if .result }}
+          <div class="alert alert-info">
+            <p>{{ .result }}</p>
+            {{ if .poolName }}
+              <p>Pool: <a href="/pools/{{ .poolName }}">{{ .poolName }}</a></p>
+              <p>Kommentar: {{ .comment }}</p>
+            {{ end }}
+          </div>
+        {{ end }}
       </section>
-      {{ end }}
 
       <section class="card">
         <h2>Verfügbare Pools</h2>

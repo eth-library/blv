@@ -159,7 +159,7 @@ func NewRouter(database *sql.DB) *gin.Engine {
 	r.POST("/pools/upload", func(c *gin.Context) {
 		fileHeader, err := c.FormFile("file")
 		if err != nil {
-			c.HTML(http.StatusBadRequest, "index.html", gin.H{
+			c.HTML(http.StatusBadRequest, "pools.html", gin.H{
 				"title": "IP Blocklist Manager",
 				"error": "Datei wurde nicht übermittelt.",
 			})
@@ -190,9 +190,11 @@ func NewRouter(database *sql.DB) *gin.Engine {
 			return
 		}
 
-		c.HTML(http.StatusOK, "index.html", gin.H{
+		names, err := db.ListPoolNames(database)
+		c.HTML(http.StatusOK, "pools.html", gin.H{
 			"title":   "IP Blocklist Manager",
 			"message": fmt.Sprintf("Liste '%s' importiert, %d Einträge übernommen.", poolName, count),
+			"pools":   names,
 		})
 	})
 

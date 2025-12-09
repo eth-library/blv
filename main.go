@@ -32,7 +32,7 @@ func main() {
 	app.LogIt.Info(ApplicationName + " starting")
 	database, err := db.Open(app.Config.DbPath)
 	if err != nil {
-		app.LogIt.Error("Fehler beim Öffnen der Datenbank: %v", err)
+		log.Fatalf("Fehler beim Öffnen der Datenbank: %v", err)
 	}
 	defer database.Close()
 
@@ -40,16 +40,11 @@ func main() {
 		functions.ExportDB(database)
 		err := db.CleanDB(database)
 		if err != nil {
-			app.LogIt.Error("Fehler beim Putzen der Datenbank: %v", err)
+			log.Fatalf("Fehler beim Putzen der Datenbank: %v", err)
 		}
-		err = db.CreateTables(database)
-		if err != nil {
-			app.LogIt.Error("Fehler beim Anlegen der Datenbank: %v", err)
+		if err := db.CreateTables(database); err != nil {
+			log.Fatalf("Fehler beim Erstellen der Tabellen: %v", err)
 		}
-	}
-
-	if err := db.CreateTables(database); err != nil {
-		log.Fatalf("Fehler beim Erstellen der Tabellen: %v", err)
 	}
 
 	r := webserver.NewRouter(database)

@@ -4,7 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 
-	_ "github.com/mattn/go-sqlite3"
+	// _ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 
 	"github.com/SvenKethz/blv/internal/helpers"
 )
@@ -27,7 +28,7 @@ func (p Pool) CommentString() string {
 }
 
 func Open(path string) (*sql.DB, error) {
-	return sql.Open("sqlite3", fmt.Sprintf("file:%s?_journal_mode=WAL", path))
+	return sql.Open("sqlite", fmt.Sprintf("file:%s?_journal_mode=WAL", path))
 }
 
 func CreateTables(db *sql.DB) error {
