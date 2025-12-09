@@ -22,11 +22,13 @@ var (
 // ========================
 
 type ApplicationConfig struct {
-	DbPath        string    `yaml:"dbPath"`
-	BlockListPath string    `yaml:"blocklistPath"`
-	OutputPath    string    `yaml:"outputPath"`
-	WebPort       int       `yaml:"webPort"`
-	Logcfg        LogConfig `yaml:"LogConfig"`
+	DbPath         string    `yaml:"dbPath"`
+	BlockListPath  string    `yaml:"blocklistPath"`
+	OutputPath     string    `yaml:"outputPath"`
+	WebfilesPath   string    `yaml:"webfilesPath"`
+	WebPort        int       `yaml:"webPort"`
+	TrustedProxies []string  `yaml:"trustedProxies"`
+	Logcfg         LogConfig `yaml:"LogConfig"`
 }
 
 type LogConfig struct {
@@ -58,10 +60,12 @@ func (Config *ApplicationConfig) Initialize(ConfigPath *string) {
 
 func (config *ApplicationConfig) setDefaults() {
 	*config = ApplicationConfig{
-		DbPath:        "/opt/blv/blv.db",
-		BlockListPath: "/etc/apache2/blocklists/",
-		OutputPath:    "/etc/apache2/blv/",
-		WebPort:       8080,
+		DbPath:         "./blv.db",
+		BlockListPath:  "./blocklists/",
+		OutputPath:     "./blv/",
+		WebfilesPath:   "./html/",
+		WebPort:        8080,
+		TrustedProxies: []string{"127.0.0.1"},
 		Logcfg: LogConfig{
 			LogLevel:  "INFO",
 			LogFolder: "./logs/",

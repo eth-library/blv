@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	app "github.com/SvenKethz/blv/internal/configuration"
 	"github.com/SvenKethz/blv/internal/db"
 	"github.com/SvenKethz/blv/internal/functions"
 	"github.com/SvenKethz/blv/internal/helpers"
@@ -17,9 +18,10 @@ import (
 
 func NewRouter(database *sql.DB) *gin.Engine {
 	r := gin.Default()
-	r.LoadHTMLGlob("templates/*.html")
+	r.SetTrustedProxies(app.Config.TrustedProxies)
+	r.LoadHTMLGlob(app.Config.WebfilesPath + "templates/*.html")
 	// Statische Dateien bereitstellen
-	r.Static("/static", "./static")
+	r.Static(app.Config.WebfilesPath+"/static", "./static")
 
 	// HTML: Startseite mit Formularen
 	r.GET("/", func(c *gin.Context) {
