@@ -35,6 +35,7 @@
               <tr>
                 <th scope="col">CIDR</th>
                 <th scope="col">Kommentar</th>
+                <th scope="col">Status</th>
                 <th scope="col">Aktion</th>
               </tr>
             </thead>
@@ -43,6 +44,7 @@
               <tr>
                 <td>{{ .CIDR }}</td>
                 <td>{{ .CommentString }}</td>
+                <td>{{ .Status }}</td>
                 <td>
                   <form method="post" action="{{ $.BasePath }}/pools/{{ $.pool }}/deleteIP">
                     <input type="hidden" name="cidr" value="{{ .CIDR }}">

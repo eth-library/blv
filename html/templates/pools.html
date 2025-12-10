@@ -55,6 +55,16 @@
               <tr>
                 <td><a href="{{ $.BasePath }}/pools/{{ . }}" class="link-item">{{ . }}</a></td>
                 <td>
+                  <form method="post" action="{{ $.BasePath }}/pools/{{ . }}/whitelist" onsubmit="return confirm('Das ändert den gesamten Pool! Sicher?');">
+                    <button type="submit" class="btn-green">gesamten Pool whitelisten</button>
+                  </form>
+                </td>
+                <td>
+                  <form method="post" action="{{ $.BasePath }}/pools/{{ . }}/block" onsubmit="return confirm('Das ändert den gesamten Pool! Sicher?');">
+                    <button type="submit" class="btn-grey">gesamten Pool blocken</button>
+                  </form>
+                </td>
+                <td>
                   <form method="post" action="{{ $.BasePath }}/pools/{{ . }}/delete" onsubmit="return confirm('Das löscht den gesamten Pool! Sicher?');">
                     <button type="submit" class="btn-danger">gesamten Pool Löschen</button>
                   </form>

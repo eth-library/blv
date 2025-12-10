@@ -189,6 +189,26 @@ button[type="submit"]:hover {
 
 /* Buttons */
 
+button.btn-green {
+  border-color: #33cc33;
+  background: #33cc33;
+}
+
+button.btn-green:hover {
+  background: #009900;
+  border-color: #009900;
+}
+
+button.btn-grey {
+  border-color: #8c8c8c;
+  background: #8c8c8c;
+}
+
+button.btn-grey:hover {
+  background: #666666;
+  border-color: #666666;
+}
+
 button.btn-danger {
   border-color: #c53030;
   background: #c53030;
