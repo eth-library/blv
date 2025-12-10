@@ -17,25 +17,25 @@ type Pool struct {
 	EndIPInt   uint32
 	CIDR       string
 	Name       string
-	Comment    sql.NullString // kann ja leer sein
-	Status     sql.NullString
+	Comment    string
+	Status     string
 }
 
-// Hilfsfunktion: NullString zu normalem String ("" bei NULL)
-func (p Pool) CommentString() string {
-	if p.Comment.Valid {
-		return p.Comment.String
-	}
-	return ""
-}
-
-// Hilfsfunktion: NullString zu normalem String ("" bei NULL)
-func (p Pool) StatusString() string {
-	if p.Status.Valid {
-		return p.Status.String
-	}
-	return ""
-}
+// // Hilfsfunktion: NullString zu normalem String ("" bei NULL)
+// func (p Pool) CommentString() string {
+// 	if p.Comment.Valid {
+// 		return p.Comment.String
+// 	}
+// 	return ""
+// }
+//
+// // Hilfsfunktion: NullString zu normalem String ("" bei NULL)
+// func (p Pool) StatusString() string {
+// 	if p.Status.Valid {
+// 		return p.Status.String
+// 	}
+// 	return ""
+// }
 
 func Open(path string) (*sql.DB, error) {
 	return sql.Open("sqlite", fmt.Sprintf("file:%s?_journal_mode=WAL", path))
@@ -144,6 +144,18 @@ func ListPoolNames(dbConn *sql.DB) ([]string, error) {
 		names = append(names, n)
 	}
 	return names, rows.Err()
+}
+
+// Einen Eintrag per CIDR und Pool whitelisten
+func WhitelistByPoolAndCIDR(dbConn *sql.DB, poolName, cidr string) error {
+	_, err := dbConn.Exec(`UPDATE pools SET status = "w" WHERE name = ? AND cidr = ?`, poolName, cidr)
+	return err
+}
+
+// Einen Eintrag per CIDR und Pool blocken
+func BlockByPoolAndCIDR(dbConn *sql.DB, poolName, cidr string) error {
+	_, err := dbConn.Exec(`UPDATE pools SET status = "b" WHERE name = ? AND cidr = ?`, poolName, cidr)
+	return err
 }
 
 // Einen Eintrag per CIDR und Pool löschen

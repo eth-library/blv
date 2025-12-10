@@ -82,21 +82,18 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 		}
 
 		var result string
-		var w bool
-		if p.StatusString() == "w" {
+		if p.Status == "w" {
 			result = fmt.Sprintf("IP %s ist whitelisted (CIDR: %s).", ipStr, p.CIDR)
-			w = true
-		} else if p.StatusString() == "b" {
+		} else if p.Status == "b" {
 			result = fmt.Sprintf("IP %s ist geblockt (CIDR: %s).", ipStr, p.CIDR)
 		}
 		c.HTML(http.StatusOK, "index.html", gin.H{
 			"title":    "IP Blocklist Manager",
 			"result":   result,
 			"poolName": p.Name,
-			"comment":  p.CommentString(),
-			"status":   p.StatusString(),
+			"comment":  p.Comment,
+			"status":   p.Status,
 			"BasePath": BasePath,
-			"w":        w,
 		})
 	})
 	r.POST("/reset", func(c *gin.Context) {
@@ -185,6 +182,26 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 		if err := db.InsertPool(database, cidr, poolName, comment); err != nil {
 			c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+"?err="+err.Error())
 			return
+		}
+		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
+	})
+
+	// Eintrag whitelisten
+	r.POST("/pools/:name/whitelistIP", func(c *gin.Context) {
+		poolName := c.Param("name")
+		cidr := c.PostForm("cidr")
+		if cidr != "" {
+			_ = db.WhitelistByPoolAndCIDR(database, poolName, cidr)
+		}
+		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
+	})
+
+	// Eintrag blocken
+	r.POST("/pools/:name/blockIP", func(c *gin.Context) {
+		poolName := c.Param("name")
+		cidr := c.PostForm("cidr")
+		if cidr != "" {
+			_ = db.BlockByPoolAndCIDR(database, poolName, cidr)
 		}
 		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
 	})

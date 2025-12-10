@@ -28,7 +28,7 @@
         {{ end }}
 
         {{ if .result }}
-        {{ if .w }}
+        {{ if eq .status "w" }}
           <div class="alert alert-success">
         {{ else }}
           <div class="alert alert-info">

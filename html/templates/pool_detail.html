@@ -43,8 +43,22 @@
             {{ range .entries }}
               <tr>
                 <td>{{ .CIDR }}</td>
-                <td>{{ .CommentString }}</td>
-                <td>{{ .Status }}</td>
+                <td>{{ .Comment }}</td>
+                {{ if eq .Status  "b" }}
+                <td>
+                  <form method="post" action="{{ $.BasePath }}/pools/{{ $.pool }}/whitelistIP">
+                    <input type="hidden" name="cidr" value="{{ .CIDR }}">
+                    <button type="submit" class="btn-green">whitelisten</button>
+                  </form>
+                </td>
+                {{ else }}
+                <td>
+                  <form method="post" action="{{ $.BasePath }}/pools/{{ $.pool }}/blockIP">
+                    <input type="hidden" name="cidr" value="{{ .CIDR }}">
+                    <button type="submit" class="btn-grey">blocken</button>
+                  </form>
+                </td>
+                {{ end }}
                 <td>
                   <form method="post" action="{{ $.BasePath }}/pools/{{ $.pool }}/deleteIP">
                     <input type="hidden" name="cidr" value="{{ .CIDR }}">
