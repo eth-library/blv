@@ -70,7 +70,7 @@ func CreateTables(database *sql.DB) error {
 	return err
 }
 
-func InsertPool(dbConn *sql.DB, cidrString, name string, comment string) error {
+func InsertPool(dbConn *sql.DB, cidrString, name string, comment string, status string) error {
 	if len(comment) > 60 {
 		comment = comment[:60]
 	}
@@ -79,8 +79,8 @@ func InsertPool(dbConn *sql.DB, cidrString, name string, comment string) error {
 		return fmt.Errorf("ungültiger CIDR %s: %w", cidrString, err)
 	}
 	_, err = dbConn.Exec(
-		"INSERT INTO pools(start_ip_int, end_ip_int, cidr, name, comment) VALUES(?, ?, ?, ?, ?)",
-		startIP, endIP, cidrString, name, comment,
+		"INSERT INTO pools(start_ip_int, end_ip_int, cidr, name, comment, status) VALUES(?, ?, ?, ?, ?, ?)",
+		startIP, endIP, cidrString, name, comment, status,
 	)
 	return err
 }

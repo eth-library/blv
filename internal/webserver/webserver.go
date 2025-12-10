@@ -179,7 +179,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+"?err=cidr_empty")
 			return
 		}
-		if err := db.InsertPool(database, cidr, poolName, comment); err != nil {
+		if err := db.InsertPool(database, cidr, poolName, comment, "b"); err != nil {
 			c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+"?err="+err.Error())
 			return
 		}
@@ -244,7 +244,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 		}
 		defer f.Close()
 
-		count, err := functions.ImportConf(database, f, poolName)
+		count, err := functions.ImportConf(database, f, poolName, "b")
 		if err != nil {
 			c.HTML(http.StatusInternalServerError, "index.html", gin.H{
 				"title":    "IP Blocklist Manager",

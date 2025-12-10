@@ -24,6 +24,7 @@ var (
 type ApplicationConfig struct {
 	DbPath         string    `yaml:"dbPath"`
 	BlocklistPath  string    `yaml:"blocklistPath"`
+	WhitelistPath  string    `yaml:"whitelistPath"`
 	OutputPath     string    `yaml:"outputPath"`
 	WebfilesPath   string    `yaml:"webfilesPath"`
 	BasePath       string    `yaml:"basePath"`
@@ -63,6 +64,7 @@ func (config *ApplicationConfig) setDefaults() {
 	*config = ApplicationConfig{
 		DbPath:         "./blv.db",
 		BlocklistPath:  "./blocklists/",
+		WhitelistPath:  "./whitelists/",
 		OutputPath:     "./output/",
 		WebfilesPath:   "./html/",
 		BasePath:       "",

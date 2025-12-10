@@ -13,7 +13,7 @@ import (
 	"github.com/SvenKethz/blv/internal/db"
 )
 
-func ImportConf(database *sql.DB, r io.Reader, poolName string) (int, error) {
+func ImportConf(database *sql.DB, r io.Reader, poolName string, status string) (int, error) {
 	scanner := bufio.NewScanner(r)
 	imported := 0
 
@@ -22,7 +22,7 @@ func ImportConf(database *sql.DB, r io.Reader, poolName string) (int, error) {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if !strings.HasPrefix(line, "Require not ip") {
+		if !strings.HasPrefix(line, "Require") {
 			continue
 		}
 
@@ -41,7 +41,7 @@ func ImportConf(database *sql.DB, r io.Reader, poolName string) (int, error) {
 			continue
 		}
 		cidr := parts[3]
-		if err := db.InsertPool(database, cidr, poolName, comment); err != nil {
+		if err := db.InsertPool(database, cidr, poolName, comment, status); err != nil {
 			return imported, fmt.Errorf("Fehler beim Import von %s: %w", cidr, err)
 		}
 		imported++
@@ -59,36 +59,83 @@ type PoolEntry struct {
 }
 
 func ExportConf(database *sql.DB, poolName string) (int, error) {
-	// Datei anlegen/überschreiben
-	f, err := os.Create(app.Config.OutputPath + poolName + ".conf")
-	if err != nil {
-		return 0, fmt.Errorf("konnte Datei nicht erstellen: %w", err)
-	}
-	defer f.Close()
-
-	w := bufio.NewWriter(f)
-	defer w.Flush()
-
-	// Header schreiben
-	fmt.Fprintln(w, "#----------------------------------------")
-	fmt.Fprintln(w, "# BLOCKLIST")
-	fmt.Fprintln(w, "#----------------------------------------")
-
 	// Einträge aus der DB lesen
-	rows, err := database.Query(`
+	w_rows, err := database.Query(`
         SELECT cidr, comment
         FROM pools
-   WHERE name = ?
+        WHERE name = ?
+   	    AND status = "w"
         ORDER BY cidr`, poolName)
 	if err != nil {
 		return 0, fmt.Errorf("konnte Pool-Einträge nicht lesen: %w", err)
 	}
-	defer rows.Close()
+	defer w_rows.Close()
+
+	b_rows, err := database.Query(`
+        SELECT cidr, comment
+        FROM pools
+        WHERE name = ?
+   	    AND status = "b"
+        ORDER BY cidr`, poolName)
+	if err != nil {
+		return 0, fmt.Errorf("konnte Pool-Einträge nicht lesen: %w", err)
+	}
+	defer b_rows.Close()
+
+	// Datei anlegen/überschreiben
+	wf, err := os.Create(app.Config.OutputPath + "whitelists/" + poolName + ".conf")
+	if err != nil {
+		return 0, fmt.Errorf("konnte Datei nicht erstellen: %w", err)
+	}
+	defer wf.Close()
+	bf, err := os.Create(app.Config.OutputPath + "blocklists/" + poolName + ".conf")
+	if err != nil {
+		return 0, fmt.Errorf("konnte Datei nicht erstellen: %w", err)
+	}
+	defer bf.Close()
+
+	w := bufio.NewWriter(wf)
+	defer w.Flush()
+
+	// Header schreiben
+	fmt.Fprintln(w, "#----------------------------------------")
+	fmt.Fprintln(w, "# WHITELIST"+poolName)
+	fmt.Fprintln(w, "#----------------------------------------")
 
 	exported := 0
-	for rows.Next() {
+	for w_rows.Next() {
 		var e PoolEntry
-		if err := rows.Scan(&e.CIDR, &e.Comment); err != nil {
+		if err := w_rows.Scan(&e.CIDR, &e.Comment); err != nil {
+			return exported, fmt.Errorf("Fehler beim Lesen der DB-Daten: %w", err)
+		}
+
+		// Kommentar ggf. beschneiden (symmetrisch zu Import)
+		comment := strings.TrimSpace(e.Comment)
+		if len(comment) > 0 {
+			if len(comment) > 60 {
+				comment = comment[:60]
+			}
+			fmt.Fprintf(w, "Require ip %s # %s\n", e.CIDR, comment)
+		} else {
+			fmt.Fprintf(w, "Require ip %s\n", e.CIDR)
+		}
+		exported++
+	}
+
+	if err := w_rows.Err(); err != nil {
+		return exported, fmt.Errorf("Fehler beim Durchlaufen der DB-Ergebnisse: %w", err)
+	}
+	w = bufio.NewWriter(bf)
+	defer w.Flush()
+
+	// Header schreiben
+	fmt.Fprintln(w, "#----------------------------------------")
+	fmt.Fprintln(w, "# BLOCKLIST"+poolName)
+	fmt.Fprintln(w, "#----------------------------------------")
+
+	for b_rows.Next() {
+		var e PoolEntry
+		if err := b_rows.Scan(&e.CIDR, &e.Comment); err != nil {
 			return exported, fmt.Errorf("Fehler beim Lesen der DB-Daten: %w", err)
 		}
 
@@ -105,7 +152,7 @@ func ExportConf(database *sql.DB, poolName string) (int, error) {
 		exported++
 	}
 
-	if err := rows.Err(); err != nil {
+	if err := b_rows.Err(); err != nil {
 		return exported, fmt.Errorf("Fehler beim Durchlaufen der DB-Ergebnisse: %w", err)
 	}
 
@@ -161,7 +208,25 @@ func LoadApacheLists(database *sql.DB) error {
 				app.LogIt.Error(fmt.Sprintf("Fehler beim Öffnen von %s: %v", conf.Name(), err))
 			} else {
 				poolName := strings.TrimSuffix(conf.Name(), filepath.Ext(conf.Name()))
-				ImportConf(database, file, poolName)
+				ImportConf(database, file, poolName, "b")
+			}
+
+		}
+	}
+	entries, err = os.ReadDir(app.Config.WhitelistPath)
+	if err != nil {
+		app.LogIt.Error(fmt.Sprintf("Fehler beim Lesen der ApacheWhitelisten: %v", err))
+	}
+
+	for _, conf := range entries {
+		if filepath.Ext(conf.Name()) == ".conf" {
+			app.LogIt.Debug("found " + conf.Name() + " in " + app.Config.WhitelistPath)
+			file, err := os.Open(app.Config.WhitelistPath + conf.Name())
+			if err != nil {
+				app.LogIt.Error(fmt.Sprintf("Fehler beim Öffnen von %s: %v", conf.Name(), err))
+			} else {
+				poolName := strings.TrimSuffix(conf.Name(), filepath.Ext(conf.Name()))
+				ImportConf(database, file, poolName, "w")
 			}
 
 		}
