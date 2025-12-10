@@ -193,7 +193,7 @@ func NewRouter(database *sql.DB) *gin.Engine {
 		}
 
 		names, err := db.ListPoolNames(database)
-		c.HTML(http.StatusOK, "/pools.html", gin.H{
+		c.HTML(http.StatusOK, "pools.html", gin.H{
 			"title":   "IP Blocklist Manager",
 			"message": fmt.Sprintf("Liste '%s' importiert, %d Einträge übernommen.", poolName, count),
 			"pools":   names,
