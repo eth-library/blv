@@ -3,9 +3,6 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 
 	// _ "github.com/mattn/go-sqlite3"
 	_ "modernc.org/sqlite"
@@ -35,46 +32,31 @@ func Open(path string) (*sql.DB, error) {
 	return sql.Open("sqlite", fmt.Sprintf("file:%s?_journal_mode=WAL", path))
 }
 
-func CreateTables(db *sql.DB) error {
+func CleanDB(database *sql.DB) error {
+	app.LogIt.Debug("CleanDB")
 	const sqlStmt = `
-    CREATE TABLE IF NOT EXISTS pools (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        start_ip_int INTEGER NOT NULL,
-        end_ip_int INTEGER NOT NULL,
-        cidr TEXT NOT NULL,
-        name TEXT,
-        comment TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_ip_range ON pools (start_ip_int, end_ip_int);
-    `
-	_, err := db.Exec(sqlStmt)
+	   DROP TABLE IF EXISTS pools;
+	   DROP INDEX IF EXISTS idx_ip_range;
+	   `
+	_, err := database.Exec(sqlStmt)
+	// err := errors.New("")
 	return err
 }
 
-func LoadApacheLists(db *sql.DB) error {
-	// 1. slice aller Dateien im Verzeichnis BlocklistPath
-	fmt.Println("WTF - why no log entries?")
-	app.LogIt.Debug("lese zum Laden der Configs alle Dateien im Verzeichnis " + app.Config.BlocklistPath)
-	entries, err := os.ReadDir(app.Config.BlocklistPath)
-	if err != nil {
-		app.LogIt.Error(fmt.Sprintf("Fehler beim Lesen der ApacheBlocklisten: %v", err))
-	}
-	for _, conf := range entries {
-		poolName := strings.TrimSuffix(conf.Name(), filepath.Ext(conf.Name()))
-		if poolName == "" {
-			poolName = "default"
-		}
-		fmt.Println(poolName)
-	}
-	return err
-}
-
-func CleanDB(db *sql.DB) error {
+func CreateTables(database *sql.DB) error {
+	app.LogIt.Debug("CreateTables")
 	const sqlStmt = `
-    DROP TABLE IF EXISTS pools;
-    DROP INDEX IF EXISTS idx_ip_range;
-    `
-	_, err := db.Exec(sqlStmt)
+	   CREATE TABLE IF NOT EXISTS pools (
+	       id INTEGER PRIMARY KEY AUTOINCREMENT,
+	       start_ip_int INTEGER NOT NULL,
+	       end_ip_int INTEGER NOT NULL,
+	       cidr TEXT NOT NULL,
+	       name TEXT,
+	       comment TEXT
+	   );
+	   CREATE INDEX IF NOT EXISTS idx_ip_range ON pools (start_ip_int, end_ip_int);
+	   `
+	_, err := database.Exec(sqlStmt)
 	return err
 }
 

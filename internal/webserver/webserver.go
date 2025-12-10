@@ -83,8 +83,12 @@ func NewRouter(database *sql.DB) *gin.Engine {
 	})
 	r.POST("/reset", func(c *gin.Context) {
 		err := functions.ResetDB(database)
-		c.HTML(http.StatusSeeOther, "pools.html", gin.H{
-			"error": err,
+		names, err := db.ListPoolNames(database)
+		c.HTML(http.StatusOK, "pools.html", gin.H{
+			"title":   "IP Blocklist Manager",
+			"message": fmt.Sprintf("%v Pools importiert", len(names)),
+			"pools":   names,
+			"error":   err,
 		})
 	})
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	app "github.com/SvenKethz/blv/internal/configuration"
@@ -77,7 +78,7 @@ func ExportConf(database *sql.DB, poolName string) (int, error) {
 	rows, err := database.Query(`
         SELECT cidr, comment
         FROM pools
-        WHERE name = ?
+   WHERE name = ?
         ORDER BY cidr`, poolName)
 	if err != nil {
 		return 0, fmt.Errorf("konnte Pool-Einträge nicht lesen: %w", err)
@@ -121,6 +122,10 @@ func ResetDB(database *sql.DB) error {
 	if err != nil {
 		app.LogIt.Error("Fehler beim Anlegen der Datenbank: %v", err)
 	}
+	err = LoadApacheLists(database)
+	if err != nil {
+		app.LogIt.Error("Fehler beim Laden der ApacheBlocklisten %v", err)
+	}
 	return err
 }
 
@@ -140,5 +145,27 @@ func ExportDB(database *sql.DB) {
 	}
 }
 
-func importConfigs() {
+func LoadApacheLists(database *sql.DB) error {
+	app.LogIt.Debug("LoadApacheLists")
+
+	entries, err := os.ReadDir(app.Config.BlocklistPath)
+	if err != nil {
+		app.LogIt.Error(fmt.Sprintf("Fehler beim Lesen der ApacheBlocklisten: %v", err))
+	}
+
+	for _, conf := range entries {
+		if filepath.Ext(conf.Name()) == ".conf" {
+			app.LogIt.Debug("found " + conf.Name() + " in " + app.Config.BlocklistPath)
+			file, err := os.Open(app.Config.BlocklistPath + conf.Name())
+			if err != nil {
+				app.LogIt.Error(fmt.Sprintf("Fehler beim Öffnen von %s: %v", conf.Name(), err))
+			} else {
+				poolName := strings.TrimSuffix(conf.Name(), filepath.Ext(conf.Name()))
+				ImportConf(database, file, poolName)
+			}
+
+		}
+	}
+
+	return err
 }
