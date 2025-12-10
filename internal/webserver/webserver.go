@@ -82,8 +82,10 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 		}
 
 		var result string
+		var w bool
 		if p.StatusString() == "w" {
 			result = fmt.Sprintf("IP %s ist whitelisted (CIDR: %s).", ipStr, p.CIDR)
+			w = true
 		} else if p.StatusString() == "b" {
 			result = fmt.Sprintf("IP %s ist geblockt (CIDR: %s).", ipStr, p.CIDR)
 		}
@@ -94,6 +96,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			"comment":  p.CommentString(),
 			"status":   p.StatusString(),
 			"BasePath": BasePath,
+			"w":        w,
 		})
 	})
 	r.POST("/reset", func(c *gin.Context) {
