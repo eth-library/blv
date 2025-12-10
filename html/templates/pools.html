@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <title>{{ .title }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="{{ .BasePath }}/static/styles.css">
 </head>
 <body>
   <header>
@@ -16,7 +16,7 @@
   <main>
     <div class="container">
       <section class="card">
-        <p><a href="/" class="link-back">Zurück zur Startseite</a></p>
+        <p><a href="{{ .BasePath }}/" class="link-back">Zurück zur Startseite</a></p>
       </section>
 
       <section class="status">
@@ -32,7 +32,7 @@
           <div class="alert alert-info">
             <p>{{ .result }}</p>
             {{ if .poolName }}
-              <p>Pool: <a href="/pools/{{ .poolName }}">{{ .poolName }}</a></p>
+              <p>Pool: <a href="{{ .BasePath }}/pools/{{ .poolName }}">{{ .poolName }}</a></p>
               <p>Kommentar: {{ .comment }}</p>
             {{ end }}
           </div>
@@ -53,9 +53,9 @@
             <tbody>
             {{ range .pools }}
               <tr>
-                <td><a href="/pools/{{ . }}" class="link-item">{{ . }}</a></td>
+                <td><a href="{{ .BasePath }}/pools/{{ . }}" class="link-item">{{ . }}</a></td>
                 <td>
-                  <form method="post" action="/pools/{{ . }}/delete" onsubmit="return confirm('Das löscht den gesamten Pool! Sicher?');">
+                  <form method="post" action="{{ .BasePath }}/pools/{{ . }}/delete" onsubmit="return confirm('Das löscht den gesamten Pool! Sicher?');">
                     <button type="submit" class="btn-danger">gesamten Pool Löschen</button>
                   </form>
                 </td>
@@ -72,7 +72,7 @@
         <section class="card">
           <h2>Blockliste hochladen</h2>
           <p class="hint">Unterstütztes Format: Konfigurationsdatei mit IP-Einträgen (.conf)</p>
-          <form method="post" action="/pools/upload" enctype="multipart/form-data">
+          <form method="post" action="{{ .BasePath }}/pools/upload" enctype="multipart/form-data">
             <div class="field-group">
               <label for="file">Datei auswählen</label>
               <input type="file" id="file" name="file" accept=".conf">
@@ -82,7 +82,7 @@
       </section>
         <section class="card">
           <h2>reset DB</h2>
-          <form method="post" action="/reset" onsubmit="return confirm('Das leert die gesamte Datenbank und lädt die Apache-Blocklisten neu ein! Sicher?');">
+          <form method="post" action="{{ .BasePath }}/reset" onsubmit="return confirm('Das leert die gesamte Datenbank und lädt die Apache-Blocklisten neu ein! Sicher?');">
             <button type="submit">RESET</button>
           </form>
       </section>

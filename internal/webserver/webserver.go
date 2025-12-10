@@ -16,17 +16,21 @@ import (
 	"github.com/SvenKethz/blv/internal/helpers"
 )
 
+var BasePath = "/blv" // app.Config.BasePath
+
 func NewRouter(database *sql.DB) *gin.Engine {
-	r := gin.Default()
-	r.SetTrustedProxies(app.Config.TrustedProxies)
-	r.LoadHTMLGlob(app.Config.WebfilesPath + "templates/*.html")
+	dr := gin.Default()
+	dr.SetTrustedProxies(app.Config.TrustedProxies)
+	dr.LoadHTMLGlob(app.Config.WebfilesPath + "templates/*.html")
+	r := dr.Group(BasePath)
 	// Statische Dateien bereitstellen
-	r.Static("/static", app.Config.WebfilesPath+"static")
+	r.Static(BasePath+"/static", app.Config.WebfilesPath+"static")
 
 	// HTML: Startseite mit Formularen
 	r.GET("/", func(c *gin.Context) {
 		c.HTML(http.StatusOK, "index.html", gin.H{
-			"title": "IP Blocklist Manager",
+			"title":    "IP Blocklist Manager",
+			"BasePath": BasePath,
 		})
 	})
 
@@ -35,24 +39,27 @@ func NewRouter(database *sql.DB) *gin.Engine {
 		ipStr := strings.TrimSpace(c.PostForm("ip"))
 		if ipStr == "" {
 			c.HTML(http.StatusBadRequest, "index.html", gin.H{
-				"title": "IP Blocklist Manager",
-				"error": "Bitte eine IP-Adresse eingeben.",
+				"title":    "IP Blocklist Manager",
+				"error":    "Bitte eine IP-Adresse eingeben.",
+				"BasePath": BasePath,
 			})
 			return
 		}
 		parsed := net.ParseIP(ipStr)
 		if parsed == nil {
 			c.HTML(http.StatusBadRequest, "index.html", gin.H{
-				"title": "IP Blocklist Manager",
-				"error": fmt.Sprintf("Ungültige IP-Adresse: %s", ipStr),
+				"title":    "IP Blocklist Manager",
+				"error":    fmt.Sprintf("Ungültige IP-Adresse: %s", ipStr),
+				"BasePath": BasePath,
 			})
 			return
 		}
 		ipUint := helpers.IPToUint32(parsed)
 		if ipUint == 0 {
 			c.HTML(http.StatusBadRequest, "index.html", gin.H{
-				"title": "IP Blocklist Manager",
-				"error": fmt.Sprintf("IP %s konnte nicht verarbeitet werden.", ipStr),
+				"title":    "IP Blocklist Manager",
+				"error":    fmt.Sprintf("IP %s konnte nicht verarbeitet werden.", ipStr),
+				"BasePath": BasePath,
 			})
 			return
 		}
@@ -60,16 +67,18 @@ func NewRouter(database *sql.DB) *gin.Engine {
 		p, err := db.FindPoolByIP(database, ipUint)
 		if err != nil {
 			c.HTML(http.StatusInternalServerError, "index.html", gin.H{
-				"title": "IP Blocklist Manager",
-				"error": fmt.Sprintf("Fehler bei der DB-Abfrage: %v", err),
+				"title":    "IP Blocklist Manager",
+				"error":    fmt.Sprintf("Fehler bei der DB-Abfrage: %v", err),
+				"BasePath": BasePath,
 			})
 			return
 		}
 
 		if p == nil {
 			c.HTML(http.StatusOK, "index.html", gin.H{
-				"title":  "IP Blocklist Manager",
-				"result": fmt.Sprintf("IP %s ist nicht geblockt.", ipStr),
+				"title":    "IP Blocklist Manager",
+				"result":   fmt.Sprintf("IP %s ist nicht geblockt.", ipStr),
+				"BasePath": BasePath,
 			})
 			return
 		}
@@ -79,16 +88,18 @@ func NewRouter(database *sql.DB) *gin.Engine {
 			"result":   fmt.Sprintf("IP %s ist geblockt (CIDR: %s).", ipStr, p.CIDR),
 			"poolName": p.Name,
 			"comment":  p.CommentString(),
+			"BasePath": BasePath,
 		})
 	})
 	r.POST("/reset", func(c *gin.Context) {
 		err := functions.ResetDB(database)
 		names, err := db.ListPoolNames(database)
 		c.HTML(http.StatusOK, "pools.html", gin.H{
-			"title":   "IP Blocklist Manager",
-			"message": fmt.Sprintf("%v Pools importiert", len(names)),
-			"pools":   names,
-			"error":   err,
+			"title":    "IP Blocklist Manager",
+			"message":  fmt.Sprintf("%v Pools importiert", len(names)),
+			"pools":    names,
+			"error":    err,
+			"BasePath": BasePath,
 		})
 	})
 
@@ -97,14 +108,16 @@ func NewRouter(database *sql.DB) *gin.Engine {
 		names, err := db.ListPoolNames(database)
 		if err != nil {
 			c.HTML(http.StatusInternalServerError, "pools.html", gin.H{
-				"title": "Pools",
-				"error": fmt.Sprintf("Fehler beim Laden der Pools: %v", err),
+				"title":    "Pools",
+				"error":    fmt.Sprintf("Fehler beim Laden der Pools: %v", err),
+				"BasePath": BasePath,
 			})
 			return
 		}
 		c.HTML(http.StatusOK, "pools.html", gin.H{
-			"title": "Pools",
-			"pools": names,
+			"title":    "Pools",
+			"pools":    names,
+			"BasePath": BasePath,
 		})
 	})
 
@@ -114,18 +127,20 @@ func NewRouter(database *sql.DB) *gin.Engine {
 		entries, err := db.ListByPool(database, poolName)
 		if err != nil {
 			c.HTML(http.StatusInternalServerError, "pool_detail.html", gin.H{
-				"title": "Pool " + poolName,
-				"error": fmt.Sprintf("Fehler beim Laden des Pools: %v", err),
+				"title":    "Pool " + poolName,
+				"error":    fmt.Sprintf("Fehler beim Laden des Pools: %v", err),
+				"BasePath": BasePath,
 			})
 			return
 		}
 		errCode := c.Query("err")
 
 		c.HTML(http.StatusOK, "pool_detail.html", gin.H{
-			"title":   "Pool " + poolName,
-			"pool":    poolName,
-			"entries": entries,
-			"error":   errCode,
+			"title":    "Pool " + poolName,
+			"pool":     poolName,
+			"entries":  entries,
+			"error":    errCode,
+			"BasePath": BasePath,
 		})
 	})
 
@@ -166,8 +181,9 @@ func NewRouter(database *sql.DB) *gin.Engine {
 		fileHeader, err := c.FormFile("file")
 		if err != nil {
 			c.HTML(http.StatusBadRequest, "pools.html", gin.H{
-				"title": "IP Blocklist Manager",
-				"error": "Datei wurde nicht übermittelt.",
+				"title":    "IP Blocklist Manager",
+				"error":    "Datei wurde nicht übermittelt.",
+				"BasePath": BasePath,
 			})
 			return
 		}
@@ -180,8 +196,9 @@ func NewRouter(database *sql.DB) *gin.Engine {
 		f, err := fileHeader.Open()
 		if err != nil {
 			c.HTML(http.StatusInternalServerError, "index.html", gin.H{
-				"title": "IP Blocklist Manager",
-				"error": "Fehler beim Öffnen der Datei.",
+				"title":    "IP Blocklist Manager",
+				"error":    "Fehler beim Öffnen der Datei.",
+				"BasePath": BasePath,
 			})
 			return
 		}
@@ -190,17 +207,19 @@ func NewRouter(database *sql.DB) *gin.Engine {
 		count, err := functions.ImportConf(database, f, poolName)
 		if err != nil {
 			c.HTML(http.StatusInternalServerError, "index.html", gin.H{
-				"title": "IP Blocklist Manager",
-				"error": fmt.Sprintf("Importfehler: %v", err),
+				"title":    "IP Blocklist Manager",
+				"error":    fmt.Sprintf("Importfehler: %v", err),
+				"BasePath": BasePath,
 			})
 			return
 		}
 
 		names, err := db.ListPoolNames(database)
 		c.HTML(http.StatusOK, "pools.html", gin.H{
-			"title":   "IP Blocklist Manager",
-			"message": fmt.Sprintf("Liste '%s' importiert, %d Einträge übernommen.", poolName, count),
-			"pools":   names,
+			"title":    "IP Blocklist Manager",
+			"message":  fmt.Sprintf("Liste '%s' importiert, %d Einträge übernommen.", poolName, count),
+			"pools":    names,
+			"BasePath": BasePath,
 		})
 	})
 
@@ -261,5 +280,5 @@ func NewRouter(database *sql.DB) *gin.Engine {
 	// 	})
 	// }
 
-	return r
+	return dr
 }

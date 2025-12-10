@@ -26,6 +26,7 @@ type ApplicationConfig struct {
 	BlocklistPath  string    `yaml:"blocklistPath"`
 	OutputPath     string    `yaml:"outputPath"`
 	WebfilesPath   string    `yaml:"webfilesPath"`
+	BasePath       string    `yaml:"basePath"`
 	WebPort        int       `yaml:"webPort"`
 	TrustedProxies []string  `yaml:"trustedProxies"`
 	Logcfg         LogConfig `yaml:"LogConfig"`
@@ -64,6 +65,7 @@ func (config *ApplicationConfig) setDefaults() {
 		BlocklistPath:  "./blocklists/",
 		OutputPath:     "./output/",
 		WebfilesPath:   "./html/",
+		BasePath:       "",
 		WebPort:        8080,
 		TrustedProxies: []string{"127.0.0.1"},
 		Logcfg: LogConfig{

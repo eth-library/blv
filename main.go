@@ -25,11 +25,20 @@ func main() {
 
 	fmt.Println("starting ", ApplicationName)
 	app.Initialize(ApplicationName, *ConfigPath)
-	// now setup logging
 	fmt.Println("LogLevel is set to " + app.Config.Logcfg.LogLevel)
 	fmt.Println("will log to", app.Config.Logcfg.LogFolder)
 
 	app.LogIt.Info(ApplicationName + " starting")
+	app.LogIt.Debug("folgende Werte wurden gesetzt")
+	app.LogIt.Debug("DbPath:         " + app.Config.DbPath)
+	app.LogIt.Debug("BlocklistPath:  " + app.Config.BlocklistPath)
+	app.LogIt.Debug("OutputPath:     " + app.Config.OutputPath)
+	app.LogIt.Debug("WebfilesPath:   " + app.Config.WebfilesPath)
+	app.LogIt.Debug("BasePath:       " + app.Config.BasePath)
+	app.LogIt.Debug(fmt.Sprintf("WebPort:        %v", app.Config.WebPort))
+	app.LogIt.Debug(fmt.Sprintf("TrustedProxies: %v", app.Config.TrustedProxies))
+	app.LogIt.Debug("LogLevel:       " + app.Config.Logcfg.LogLevel)
+	app.LogIt.Debug("LogFolder:      " + app.Config.Logcfg.LogFolder)
 	database, err := db.Open(app.Config.DbPath)
 	if err != nil {
 		log.Fatalf("Fehler beim Öffnen der Datenbank: %v", err)
