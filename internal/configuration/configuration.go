@@ -23,7 +23,7 @@ var (
 
 type ApplicationConfig struct {
 	DbPath         string    `yaml:"dbPath"`
-	BlockListPath  string    `yaml:"blocklistPath"`
+	BlocklistPath  string    `yaml:"blocklistPath"`
 	OutputPath     string    `yaml:"outputPath"`
 	WebfilesPath   string    `yaml:"webfilesPath"`
 	WebPort        int       `yaml:"webPort"`
@@ -61,7 +61,7 @@ func (Config *ApplicationConfig) Initialize(ConfigPath *string) {
 func (config *ApplicationConfig) setDefaults() {
 	*config = ApplicationConfig{
 		DbPath:         "./blv.db",
-		BlockListPath:  "./blocklists/",
+		BlocklistPath:  "./blocklists/",
 		OutputPath:     "./blv/",
 		WebfilesPath:   "./html/",
 		WebPort:        8080,
