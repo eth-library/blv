@@ -16,15 +16,13 @@ import (
 	"github.com/SvenKethz/blv/internal/helpers"
 )
 
-var BasePath = "/blv" // app.Config.BasePath
-
-func NewRouter(database *sql.DB) *gin.Engine {
+func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	dr := gin.Default()
 	dr.SetTrustedProxies(app.Config.TrustedProxies)
 	dr.LoadHTMLGlob(app.Config.WebfilesPath + "templates/*.html")
 	r := dr.Group(BasePath)
 	// Statische Dateien bereitstellen
-	r.Static(BasePath+"/static", app.Config.WebfilesPath+"static")
+	r.Static("/static", app.Config.WebfilesPath+"static")
 
 	// HTML: Startseite mit Formularen
 	r.GET("/", func(c *gin.Context) {
@@ -148,7 +146,7 @@ func NewRouter(database *sql.DB) *gin.Engine {
 	r.POST("/pools/:name/delete", func(c *gin.Context) {
 		poolName := c.Param("name")
 		_ = db.DeletePool(database, poolName)
-		c.Redirect(http.StatusSeeOther, "/pools/")
+		c.Redirect(http.StatusSeeOther, BasePath+"/pools/")
 	})
 	// Eintrag hinzufügen
 	r.POST("/pools/:name/addIP", func(c *gin.Context) {
@@ -156,14 +154,14 @@ func NewRouter(database *sql.DB) *gin.Engine {
 		cidr := strings.TrimSpace(c.PostForm("cidr"))
 		comment := strings.TrimSpace(c.PostForm("comment"))
 		if cidr == "" {
-			c.Redirect(http.StatusSeeOther, "/pools/"+poolName+"?err=cidr_empty")
+			c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+"?err=cidr_empty")
 			return
 		}
 		if err := db.InsertPool(database, cidr, poolName, comment); err != nil {
-			c.Redirect(http.StatusSeeOther, "/pools/"+poolName+"?err="+err.Error())
+			c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+"?err="+err.Error())
 			return
 		}
-		c.Redirect(http.StatusSeeOther, "/pools/"+poolName)
+		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
 	})
 
 	// Eintrag löschen
@@ -173,7 +171,7 @@ func NewRouter(database *sql.DB) *gin.Engine {
 		if cidr != "" {
 			_ = db.DeleteByPoolAndCIDR(database, poolName, cidr)
 		}
-		c.Redirect(http.StatusSeeOther, "/pools/"+poolName)
+		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
 	})
 
 	// HTML: Upload einer *.conf mit ImportConf

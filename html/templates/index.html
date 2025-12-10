@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <title>{{ .title }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="{{ .BasePath }}/static/styles.css">
+  <link rel="stylesheet" href="{{$.BasePath}}/static/styles.css">
 </head>
 <body>
   <header>
@@ -16,7 +16,7 @@
   <main>
     <div class="container">
       <section class="card">
-        <p><a href="{{ .BasePath }}/pools" class="link-back">Zur Poolübersicht</a></p>
+        <p><a href="{{$.BasePath}}/pools" class="link-back">Zur Poolübersicht</a></p>
       </section>
       <section class="status">
         {{ if .error }}
@@ -31,7 +31,7 @@
           <div class="alert alert-info">
             <p>{{ .result }}</p>
             {{ if .poolName }}
-              <p>Pool: <a href="{{ .BasePath }}/pools/{{ .poolName }}">{{ .poolName }}</a></p>
+              <p>Pool: <a href="{{$.BasePath}}/pools/{{ .poolName }}">{{ .poolName }}</a></p>
               <p>Kommentar: {{ .comment }}</p>
             {{ end }}
           </div>
@@ -40,7 +40,7 @@
 
         <section class="card">
           <h2>IP-Adresse prüfen</h2>
-          <form method="post" action="{{ .BasePath }}/check" novalidate>
+          <form method="post" action="{{$.BasePath}}/check" novalidate>
             <div class="field-group">
               <label for="ip">IP-Adresse</label>
               <input type="text" id="ip" name="ip" autocomplete="off" placeholder="z. B. 192.0.2.1">

@@ -49,7 +49,7 @@ func main() {
 		functions.ResetDB(database)
 	}
 
-	r := webserver.NewRouter(database)
+	r := webserver.NewRouter(database, app.Config.BasePath)
 	addr := fmt.Sprintf(":%d", app.Config.WebPort)
 	log.Printf("Starte Webserver auf %s ...", addr)
 	if err := r.Run(addr); err != nil {
