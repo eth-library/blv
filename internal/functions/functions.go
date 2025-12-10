@@ -57,9 +57,9 @@ type PoolEntry struct {
 	Comment string
 }
 
-func ExportConf(database *sql.DB, poolName, path string) (int, error) {
+func ExportConf(database *sql.DB, poolName string) (int, error) {
 	// Datei anlegen/überschreiben
-	f, err := os.Create(path)
+	f, err := os.Create(app.Config.OutputPath + poolName + ".conf")
 	if err != nil {
 		return 0, fmt.Errorf("konnte Datei nicht erstellen: %w", err)
 	}
@@ -77,7 +77,7 @@ func ExportConf(database *sql.DB, poolName, path string) (int, error) {
 	rows, err := database.Query(`
         SELECT cidr, comment
         FROM pools
-        WHERE pool = ?
+        WHERE name = ?
         ORDER BY cidr`, poolName)
 	if err != nil {
 		return 0, fmt.Errorf("konnte Pool-Einträge nicht lesen: %w", err)
@@ -131,14 +131,14 @@ func ExportDB(database *sql.DB) {
 	}
 	for _, pool := range pools {
 		outputFilePath := app.Config.OutputPath + pool + ".conf"
-		count, err := ExportConf(database, pool, "")
+		count, err := ExportConf(database, pool)
 		if err != nil {
-			app.LogIt.Error("Fehler beim Export des Pools %s: %v", pool, err)
+			app.LogIt.Error(fmt.Sprintf("Fehler beim Export des Pools %s: %v", pool, err))
+		} else {
+			app.LogIt.Info(fmt.Sprintf("%d", count) + " items from " + pool + " exported to " + outputFilePath)
 		}
-		app.LogIt.Info(fmt.Sprintf("%d", count) + " items from " + pool + " exported to " + outputFilePath)
 	}
 }
 
 func importConfigs() {
 }
-

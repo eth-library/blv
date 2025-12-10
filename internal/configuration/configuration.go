@@ -62,7 +62,7 @@ func (config *ApplicationConfig) setDefaults() {
 	*config = ApplicationConfig{
 		DbPath:         "./blv.db",
 		BlocklistPath:  "./blocklists/",
-		OutputPath:     "./blv/",
+		OutputPath:     "./output/",
 		WebfilesPath:   "./html/",
 		WebPort:        8080,
 		TrustedProxies: []string{"127.0.0.1"},
@@ -90,7 +90,12 @@ type File2Parse struct {
 }
 
 func SetupLogging(logcfg LogConfig, ApplicationName string) *slog.Logger {
-	filename := ApplicationName + "_" + time.Now().Format("20060102_150405") + ".log"
+	filename := ApplicationName
+	if logcfg.LogLevel == "Debug" {
+		filename += ".log"
+	} else {
+		filename += "_" + time.Now().Format("20060102_150405") + ".log"
+	}
 	if logcfg.LogFolder == "" {
 		cwd, _ := os.Getwd()
 		logcfg.LogFolder = cwd + "/logs/"

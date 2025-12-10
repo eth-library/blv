@@ -37,13 +37,16 @@ func main() {
 	defer database.Close()
 
 	if *Reset {
+		app.LogIt.Debug("Reset am Laufen")
 		functions.ExportDB(database)
-		err := db.CleanDB(database)
-		if err != nil {
+		if err := db.CleanDB(database); err != nil {
 			log.Fatalf("Fehler beim Putzen der Datenbank: %v", err)
 		}
 		if err := db.CreateTables(database); err != nil {
 			log.Fatalf("Fehler beim Erstellen der Tabellen: %v", err)
+		}
+		if err := db.LoadApacheLists(database); err != nil {
+			log.Fatalf("Fehler beim Laden der aktuellen Apache-Blocklisten: %v", err)
 		}
 	}
 

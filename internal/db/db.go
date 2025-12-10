@@ -3,10 +3,14 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	// _ "github.com/mattn/go-sqlite3"
 	_ "modernc.org/sqlite"
 
+	app "github.com/SvenKethz/blv/internal/configuration"
 	"github.com/SvenKethz/blv/internal/helpers"
 )
 
@@ -44,6 +48,24 @@ func CreateTables(db *sql.DB) error {
     CREATE INDEX IF NOT EXISTS idx_ip_range ON pools (start_ip_int, end_ip_int);
     `
 	_, err := db.Exec(sqlStmt)
+	return err
+}
+
+func LoadApacheLists(db *sql.DB) error {
+	// 1. slice aller Dateien im Verzeichnis BlocklistPath
+	fmt.Println("WTF - why no log entries?")
+	app.LogIt.Debug("lese zum Laden der Configs alle Dateien im Verzeichnis " + app.Config.BlocklistPath)
+	entries, err := os.ReadDir(app.Config.BlocklistPath)
+	if err != nil {
+		app.LogIt.Error(fmt.Sprintf("Fehler beim Lesen der ApacheBlocklisten: %v", err))
+	}
+	for _, conf := range entries {
+		poolName := strings.TrimSuffix(conf.Name(), filepath.Ext(conf.Name()))
+		if poolName == "" {
+			poolName = "default"
+		}
+		fmt.Println(poolName)
+	}
 	return err
 }
 
