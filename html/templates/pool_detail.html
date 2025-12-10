@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <title>{{ .title }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="static/styles.css">
 </head>
 <body>
   <header>
@@ -16,8 +16,8 @@
   <main>
     <div class="container">
       <section class="card">
-        <p><a href="/pools" class="link-back">Zurück zur Poolübersicht</a></p>
-        <p><a href="/" class="link-back">Zurück zur Startseite</a></p>
+        <p><a href="pools" class="link-back">Zurück zur Poolübersicht</a></p>
+        <p><a href="./" class="link-back">Zurück zur Startseite</a></p>
       </section>
 
       {{ if .error }}
@@ -44,7 +44,7 @@
                 <td>{{ .CIDR }}</td>
                 <td>{{ .CommentString }}</td>
                 <td>
-                  <form method="post" action="/pools/{{ $.pool }}/deleteIP">
+                  <form method="post" action="pools/{{ $.pool }}/deleteIP">
                     <input type="hidden" name="cidr" value="{{ .CIDR }}">
                     <button type="submit" class="btn-danger">Löschen</button>
                   </form>
@@ -62,7 +62,7 @@
 
       <section class="card">
         <h3>Neuen CIDR hinzufügen</h3>
-        <form method="post" action="/pools/{{ .pool }}/addIP" novalidate>
+        <form method="post" action="pools/{{ .pool }}/addIP" novalidate>
           <div class="field-group">
             <label for="cidr">CIDR</label>
             <input type="text" id="cidr" name="cidr" placeholder="z. B. 192.168.1.0/24">
