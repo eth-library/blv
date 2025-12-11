@@ -81,11 +81,16 @@
       </section>
         <section class="card">
           <h2>Blockliste hochladen</h2>
-          <p class="hint">Unterstütztes Format: Konfigurationsdatei mit IP-Einträgen (.conf)</p>
+          <p class="hint">Unterstützte Formate: 
+            <ul>
+              <li>Apache Konfigurationsdatei mit require [not] IP-Einträgen (.conf)</li>
+              <li>einfache IP-Listen (.txt)</li>
+            </ul>
+          </p>
           <form method="post" action="{{ $.BasePath }}/pools/upload" enctype="multipart/form-data">
             <div class="field-group">
               <label for="file">Datei auswählen</label>
-              <input type="file" id="file" name="file" accept=".conf">
+              <input type="file" id="file" name="file" accept=".conf, .txt">
             </div>
             <button type="submit">Hochladen</button>
           </form>
