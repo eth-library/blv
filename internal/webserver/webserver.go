@@ -23,6 +23,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	r := dr.Group(BasePath)
 	// Statische Dateien bereitstellen
 	r.Static("/static", app.Config.WebfilesPath+"static")
+	r.StaticFile("/favicon.ico", app.Config.WebfilesPath+"/static/favicon.ico")
 
 	// HTML: Startseite mit Formularen
 	r.GET("/", func(c *gin.Context) {
