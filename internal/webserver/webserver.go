@@ -153,7 +153,8 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	// Pool exportieren
 	r.POST("/pools/:name/export", func(c *gin.Context) {
 		poolName := c.Param("name")
-		count, err := functions.ExportConf(database, poolName)
+		wCount, bCount, err := functions.ExportConf(database, poolName)
+		count := wCount + bCount
 		if err != nil {
 			c.HTML(http.StatusSeeOther, "pool_detail.html", gin.H{
 				"title":    "Pool " + poolName,

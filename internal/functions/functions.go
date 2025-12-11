@@ -37,11 +37,6 @@ func ImportConf(database *sql.DB, r io.Reader, poolName string, status string) (
 			line = strings.TrimSpace(line[:idx])
 		}
 
-		// parts := strings.Fields(line)
-		// if len(parts) < 4 {
-		// 	continue
-		// }
-		// cidr := parts[3]
 		var cidr string
 		for part := range strings.FieldsSeq(line) {
 			if helpers.StartsWithIP(part) {
@@ -65,105 +60,89 @@ type PoolEntry struct {
 	Comment string
 }
 
-func ExportConf(database *sql.DB, poolName string) (int, error) {
-	// Einträge aus der DB lesen
-	w_rows, err := database.Query(`
-        SELECT cidr, comment
-        FROM pools
-        WHERE name = ?
-   	    AND status = "w"
-        ORDER BY cidr`, poolName)
-	if err != nil {
-		return 0, fmt.Errorf("konnte Pool-Einträge nicht lesen: %w", err)
-	}
-	defer w_rows.Close()
-
-	b_rows, err := database.Query(`
-        SELECT cidr, comment
-        FROM pools
-        WHERE name = ?
-   	    AND status = "b"
-        ORDER BY cidr`, poolName)
-	if err != nil {
-		return 0, fmt.Errorf("konnte Pool-Einträge nicht lesen: %w", err)
-	}
-	defer b_rows.Close()
-
-	// Datei anlegen/überschreiben
-	wf, err := os.Create(app.Config.OutputPath + "whitelists/" + poolName + ".conf")
-	if err != nil {
-		return 0, fmt.Errorf("konnte Datei nicht erstellen: %w", err)
-	}
-	defer wf.Close()
-	bf, err := os.Create(app.Config.OutputPath + "blocklists/" + poolName + ".conf")
-	if err != nil {
-		return 0, fmt.Errorf("konnte Datei nicht erstellen: %w", err)
-	}
-	defer bf.Close()
-
-	w := bufio.NewWriter(wf)
-	defer w.Flush()
-
-	// Header schreiben
-	fmt.Fprintln(w, "#----------------------------------------")
-	fmt.Fprintln(w, "# WHITELIST"+poolName)
-	fmt.Fprintln(w, "#----------------------------------------")
-
-	exported := 0
-	for w_rows.Next() {
-		var e PoolEntry
-		if err := w_rows.Scan(&e.CIDR, &e.Comment); err != nil {
-			return exported, fmt.Errorf("Fehler beim Lesen der DB-Daten: %w", err)
+func GetStatusCount(entries []db.Pool) (wCount int, bCount int) {
+	for _, e := range entries {
+		if e.Status == "w" {
+			wCount++
+		} else if e.Status == "b" {
+			bCount++
 		}
+	}
+	return wCount, bCount
+}
 
-		// Kommentar ggf. beschneiden (symmetrisch zu Import)
-		comment := strings.TrimSpace(e.Comment)
-		if len(comment) > 0 {
-			if len(comment) > 60 {
-				comment = comment[:60]
+func ExportConf(database *sql.DB, poolName string) (wExported int, bExported int, err error) {
+	entries, _ := db.ListByPool(database, poolName)
+	wCount, bCount := GetStatusCount(entries)
+	wExported = 0
+	bExported = 0
+
+	if wCount > 0 {
+		// Datei anlegen/überschreiben
+		whitelistFile, err := os.Create(app.Config.OutputPath + "whitelists/" + poolName + ".conf")
+		if err != nil {
+			return 0, 0, fmt.Errorf("konnte Datei nicht erstellen: %w", err)
+		}
+		defer whitelistFile.Close()
+
+		w := bufio.NewWriter(whitelistFile)
+		defer w.Flush()
+
+		// Header schreiben
+		fmt.Fprintln(w, "#----------------------------------------")
+		fmt.Fprintln(w, "# WHITELIST "+poolName)
+		fmt.Fprintln(w, "#----------------------------------------")
+
+		for _, e := range entries {
+			if e.Status == "w" {
+				// Kommentar ggf. beschneiden (symmetrisch zu Import)
+				comment := strings.TrimSpace(e.Comment)
+				if len(comment) > 0 {
+					if len(comment) > 60 {
+						comment = comment[:60]
+					}
+					fmt.Fprintf(w, "Require ip %s # %s\n", e.CIDR, comment)
+				} else {
+					fmt.Fprintf(w, "Require ip %s\n", e.CIDR)
+				}
+				wExported++
 			}
-			fmt.Fprintf(w, "Require ip %s # %s\n", e.CIDR, comment)
-		} else {
-			fmt.Fprintf(w, "Require ip %s\n", e.CIDR)
 		}
-		exported++
 	}
-
-	if err := w_rows.Err(); err != nil {
-		return exported, fmt.Errorf("Fehler beim Durchlaufen der DB-Ergebnisse: %w", err)
-	}
-	w = bufio.NewWriter(bf)
-	defer w.Flush()
-
-	// Header schreiben
-	fmt.Fprintln(w, "#----------------------------------------")
-	fmt.Fprintln(w, "# BLOCKLIST"+poolName)
-	fmt.Fprintln(w, "#----------------------------------------")
-
-	for b_rows.Next() {
-		var e PoolEntry
-		if err := b_rows.Scan(&e.CIDR, &e.Comment); err != nil {
-			return exported, fmt.Errorf("Fehler beim Lesen der DB-Daten: %w", err)
+	if bCount > 0 {
+		// Datei anlegen/überschreiben
+		blocklistFile, err := os.Create(app.Config.OutputPath + "blocklists/" + poolName + ".conf")
+		if err != nil {
+			return 0, 0, fmt.Errorf("konnte Datei nicht erstellen: %w", err)
 		}
+		defer blocklistFile.Close()
 
-		// Kommentar ggf. beschneiden (symmetrisch zu Import)
-		comment := strings.TrimSpace(e.Comment)
-		if len(comment) > 0 {
-			if len(comment) > 60 {
-				comment = comment[:60]
+		w := bufio.NewWriter(blocklistFile)
+		defer w.Flush()
+
+		// Header schreiben
+		fmt.Fprintln(w, "#----------------------------------------")
+		fmt.Fprintln(w, "# BLOCKLIST "+poolName)
+		fmt.Fprintln(w, "#----------------------------------------")
+
+		for _, e := range entries {
+			if e.Status == "b" {
+				// Kommentar ggf. beschneiden (symmetrisch zu Import)
+				comment := strings.TrimSpace(e.Comment)
+				if len(comment) > 0 {
+					if len(comment) > 60 {
+						comment = comment[:60]
+					}
+					fmt.Fprintf(w, "Require not ip %s # %s\n", e.CIDR, comment)
+				} else {
+					fmt.Fprintf(w, "Require not ip %s\n", e.CIDR)
+				}
+				bExported++
 			}
-			fmt.Fprintf(w, "Require not ip %s # %s\n", e.CIDR, comment)
-		} else {
-			fmt.Fprintf(w, "Require not ip %s\n", e.CIDR)
 		}
-		exported++
 	}
 
-	if err := b_rows.Err(); err != nil {
-		return exported, fmt.Errorf("Fehler beim Durchlaufen der DB-Ergebnisse: %w", err)
-	}
-
-	return exported, nil
+	return wExported, bExported, nil
 }
 
 func InitDB(database *sql.DB) error {
@@ -198,7 +177,8 @@ func ExportDB(database *sql.DB) {
 	}
 	for _, pool := range pools {
 		outputFilePath := app.Config.OutputPath + pool + ".conf"
-		count, err := ExportConf(database, pool)
+		wCount, bCount, err := ExportConf(database, pool)
+		count := wCount + bCount
 		if err != nil {
 			app.LogIt.Error(fmt.Sprintf("Fehler beim Export des Pools %s: %v", pool, err))
 		} else {
