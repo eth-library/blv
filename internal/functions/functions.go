@@ -11,6 +11,7 @@ import (
 
 	app "github.com/SvenKethz/blv/internal/configuration"
 	"github.com/SvenKethz/blv/internal/db"
+	"github.com/SvenKethz/blv/internal/helpers"
 )
 
 func ImportConf(database *sql.DB, r io.Reader, poolName string, status string) (int, error) {
@@ -22,7 +23,7 @@ func ImportConf(database *sql.DB, r io.Reader, poolName string, status string) (
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if !strings.HasPrefix(line, "Require") {
+		if !strings.HasPrefix(line, "Require") && !helpers.StartsWithIP(line) {
 			continue
 		}
 
@@ -36,11 +37,17 @@ func ImportConf(database *sql.DB, r io.Reader, poolName string, status string) (
 			line = strings.TrimSpace(line[:idx])
 		}
 
-		parts := strings.Fields(line)
-		if len(parts) < 4 {
-			continue
+		// parts := strings.Fields(line)
+		// if len(parts) < 4 {
+		// 	continue
+		// }
+		// cidr := parts[3]
+		var cidr string
+		for part := range strings.FieldsSeq(line) {
+			if helpers.StartsWithIP(part) {
+				cidr = part
+			}
 		}
-		cidr := parts[3]
 		if err := db.InsertPool(database, cidr, poolName, comment, status); err != nil {
 			return imported, fmt.Errorf("Fehler beim Import von %s: %w", cidr, err)
 		}

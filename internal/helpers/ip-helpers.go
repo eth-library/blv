@@ -7,7 +7,19 @@ import (
 
 var ipAtStart = regexp.MustCompile(`^([0-9]{1,3}\.){3}[0-9]{1,3}`)
 
-func startsWithIP(s string) (bool, net.IP) {
+func StartsWithIP(s string) bool {
+	m := ipAtStart.FindString(s)
+	if m == "" {
+		return false
+	}
+	ip := net.ParseIP(m)
+	if ip == nil {
+		return false
+	}
+	return true
+}
+
+func StartsWithAndReturnIP(s string) (bool, net.IP) {
 	m := ipAtStart.FindString(s)
 	if m == "" {
 		return false, nil
