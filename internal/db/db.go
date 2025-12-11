@@ -21,22 +21,6 @@ type Pool struct {
 	Status     string
 }
 
-// // Hilfsfunktion: NullString zu normalem String ("" bei NULL)
-// func (p Pool) CommentString() string {
-// 	if p.Comment.Valid {
-// 		return p.Comment.String
-// 	}
-// 	return ""
-// }
-//
-// // Hilfsfunktion: NullString zu normalem String ("" bei NULL)
-// func (p Pool) StatusString() string {
-// 	if p.Status.Valid {
-// 		return p.Status.String
-// 	}
-// 	return ""
-// }
-
 func Open(path string) (*sql.DB, error) {
 	return sql.Open("sqlite", fmt.Sprintf("file:%s?_journal_mode=WAL", path))
 }
