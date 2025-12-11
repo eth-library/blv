@@ -12,12 +12,12 @@
       <h1>{{ .title }}</h1>
     </div>
   </header>
+      <ul class="menu container">
+        <li><a href="{{$.BasePath}}/pools" class="link-back">Zur Poolübersicht</a></li>
+      </ul>
 
   <main>
     <div class="container">
-      <section class="card">
-        <p><a href="{{$.BasePath}}/pools" class="link-back">Zur Poolübersicht</a></p>
-      </section>
       <section class="status">
         {{ if .error }}
         <div class="alert alert-error">{{ .error }}</div>

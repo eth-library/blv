@@ -12,12 +12,12 @@
       <h1>{{ .title }}</h1>
     </div>
   </header>
+      <ul class="menu container">
+        <li><a href="{{ $.BasePath }}/" class="link-back">Zurück zur Startseite</a></li>
+      </ul>
 
   <main>
     <div class="container">
-      <section class="card">
-        <p><a href="{{ $.BasePath }}/" class="link-back">Zurück zur Startseite</a></p>
-      </section>
 
       <section class="status">
         {{ if .error }}
@@ -42,42 +42,13 @@
       <section class="card">
         <h2>Verfügbare Pools</h2>
 
-        <div class="table-wrapper">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th scope="col">Pool Name</th>
-                <th scope="col">Aktion</th>
-              </tr>
-            </thead>
-            <tbody>
+        <ul class="data-list">
             {{ range .pools }}
-              <tr>
-                <td><a href="{{ $.BasePath }}/pools/{{ . }}" class="link-item">{{ . }}</a></td>
-                <td>
-                  <form method="post" action="{{ $.BasePath }}/pools/{{ . }}/whitelist" onsubmit="return confirm('Das ändert den gesamten Pool! Sicher?');">
-                    <button type="submit" class="btn-green">gesamten Pool whitelisten</button>
-                  </form>
-                </td>
-                <td>
-                  <form method="post" action="{{ $.BasePath }}/pools/{{ . }}/block" onsubmit="return confirm('Das ändert den gesamten Pool! Sicher?');">
-                    <button type="submit" class="btn-grey">gesamten Pool blocken</button>
-                  </form>
-                </td>
-                <td>
-                  <form method="post" action="{{ $.BasePath }}/pools/{{ . }}/delete" onsubmit="return confirm('Das löscht den gesamten Pool! Sicher?');">
-                    <button type="submit" class="btn-danger">gesamten Pool Löschen</button>
-                  </form>
-                </td>
-              </tr>
+                <li><a href="{{ $.BasePath }}/pools/{{ . }}" class="link-item">{{ . }}</a></li>
             {{ else }}
-              <tr>
-                <td colspan="2" class="table-empty">Keine Einträge vorhanden.</td>
-              </tr>
+                <li>Keine Einträge vorhanden.</li>
             {{ end }}
-            </tbody>
-          </table>
-        </div>
+        </ul>
       </section>
         <section class="card">
           <h2>Blockliste hochladen</h2>

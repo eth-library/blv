@@ -40,6 +40,20 @@ header .container {
   padding-bottom: 1rem;
 }
 
+.menu {
+  display: flex;
+  gap: 0.5rem; 
+  list-style: none;
+}
+
+.menu form {
+  flex: 1;          /* alle teilen sich den verfügbaren Platz gleich */
+}
+
+.menu button {
+  width: 100%;      /* Button füllt das Form-Element aus */
+}
+
 h1 {
   margin: 0;
   font-size: 1.6rem;

@@ -12,31 +12,41 @@
       <h1>{{ .title }}</h1>
     </div>
   </header>
+      <ul class="menu container">
+        <li><a href="{{ $.BasePath }}/pools" class="link-back">Zurück zur Poolübersicht</a></li>
+        <li><a href="{{ $.BasePath }}/" class="link-back">Zurück zur Startseite</a></li>
+      </ul>
 
   <main>
     <div class="container">
-      <section class="card">
-        <p><a href="{{ $.BasePath }}/pools" class="link-back">Zurück zur Poolübersicht</a></p>
-        <p><a href="{{ $.BasePath }}/" class="link-back">Zurück zur Startseite</a></p>
-      </section>
 
       {{ if .error }}
       <section class="status">
         <div class="alert alert-error">{{ .error }}</div>
       </section>
       {{ end }}
-
+      <section class="card menu">
+        <form method="post" action="{{ $.BasePath }}/pools/{{ . }}/whitelist" onsubmit="return confirm('Das ändert den gesamten Pool! Sicher?');">
+          <button type="submit" class="btn-green">gesamten Pool whitelisten</button>
+        </form>
+        <form method="post" action="{{ $.BasePath }}/pools/{{ . }}/block" onsubmit="return confirm('Das ändert den gesamten Pool! Sicher?');">
+          <button type="submit" class="btn-grey">gesamten Pool blocken</button>
+        </form>
+        <form method="post" action="{{ $.BasePath }}/pools/{{ . }}/delete" onsubmit="return confirm('Das löscht den gesamten Pool! Sicher?');">
+          <button type="submit" class="btn-danger">gesamten Pool Löschen</button>
+        </form>
+      </section>
+        
+      </section>
       <section class="card">
-        <h2>Pool "{{ .pool }}"</h2>
-
         <div class="table-wrapper">
           <table class="data-table">
             <thead>
               <tr>
                 <th scope="col">CIDR</th>
                 <th scope="col">Kommentar</th>
-                <th scope="col">Status</th>
                 <th scope="col">Aktion</th>
+                <th scope="col"></th>
               </tr>
             </thead>
             <tbody>
