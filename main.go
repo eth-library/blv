@@ -39,20 +39,42 @@ func main() {
 	app.LogIt.Debug(fmt.Sprintf("TrustedProxies: %v", app.Config.TrustedProxies))
 	app.LogIt.Debug("LogLevel:       " + app.Config.Logcfg.LogLevel)
 	app.LogIt.Debug("LogFolder:      " + app.Config.Logcfg.LogFolder)
-	database, err := db.Open(app.Config.DbPath)
-	if err != nil {
-		log.Fatalf("Fehler beim Öffnen der Datenbank: %v", err)
-	}
-	defer database.Close()
 
-	if *Reset {
-		functions.ResetDB(database)
-	}
+	if *DBinit {
+		app.LogIt.Info("Die DB wird initialisiert.")
+		if helpers.FileExists(app.Config.DbPath) {
+			os.Remove(app.Config.DbPath)
+		}
+		database, err := db.Open(app.Config.DbPath)
+		if err != nil {
+			log.Fatalf("Fehler beim Öffnen der Datenbank: %v", err)
+		}
+		defer database.Close()
+		if err := functions.InitDB(database); err != nil {
+			log.Fatalf("Fehler beim Initialisieren der Datenbank: %v", err)
+		}
+		app.LogIt.Info("Die DB wurde initialisiert - nun kann das System gestartet werden.")
+		fmt.Println("Die DB wurde initialisiert - nun kann das System gestartet werden.")
+	} else {
+		database, err := db.Open(app.Config.DbPath)
+		if err != nil {
+			log.Fatalf("Fehler beim Öffnen der Datenbank: %v", err)
+		}
+		defer database.Close()
 
-	r := webserver.NewRouter(database, app.Config.BasePath)
-	addr := fmt.Sprintf(":%d", app.Config.WebPort)
-	log.Printf("Starte Webserver auf %s ...", addr)
-	if err := r.Run(addr); err != nil {
-		log.Fatalf("Fehler beim Starten des Servers: %v", err)
+		if *Reset {
+			app.LogIt.Info("Die DB wird nun zurückgesetzt und die Apache-Listen neu geladen - was kann etwas dauern.")
+			fmt.Println("Die DB wird nun zurückgesetzt und die Apache-Listen neu geladen - was kann etwas dauern.")
+			functions.ResetDB(database)
+			app.LogIt.Info("Die DB wurde zurückgesetzt und die Apache-Listen neu geladen.")
+			fmt.Println("Die DB wurde zurückgesetzt und die Apache-Listen neu geladen.")
+		} else {
+			r := webserver.NewRouter(database, app.Config.BasePath)
+			addr := fmt.Sprintf(":%d", app.Config.WebPort)
+			log.Printf("Starte Webserver auf %s ...", addr)
+			if err := r.Run(addr); err != nil {
+				log.Fatalf("Fehler beim Starten des Servers: %v", err)
+			}
+		}
 	}
 }

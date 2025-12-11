@@ -166,6 +166,14 @@ func ExportConf(database *sql.DB, poolName string) (int, error) {
 	return exported, nil
 }
 
+func InitDB(database *sql.DB) error {
+	err := db.CreateTables(database)
+	if err != nil {
+		app.LogIt.Error("Fehler beim Anlegen der Datenbank: %v", err)
+	}
+	return err
+}
+
 func ResetDB(database *sql.DB) error {
 	ExportDB(database)
 	err := db.CleanDB(database)
