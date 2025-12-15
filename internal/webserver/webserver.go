@@ -63,7 +63,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			return
 		}
 
-		p, err := db.FindPoolByIP(database, ipUint)
+		entries, err := db.FindPoolByIP(database, ipUint)
 		if err != nil {
 			c.HTML(http.StatusInternalServerError, "index.html", gin.H{
 				"title":    "IP Blocklist Manager",
@@ -73,7 +73,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			return
 		}
 
-		if p == nil {
+		if entries == nil {
 			c.HTML(http.StatusOK, "index.html", gin.H{
 				"title":    "IP Blocklist Manager",
 				"result":   fmt.Sprintf("IP %s ist nicht registriert.", ipStr),
@@ -82,22 +82,13 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			return
 		}
 
-		var result string
-		switch p.Status {
-		case "w":
-			result = fmt.Sprintf("IP %s ist whitelisted (CIDR: %s).", ipStr, p.CIDR)
-		case "b":
-			result = fmt.Sprintf("IP %s ist geblockt (CIDR: %s).", ipStr, p.CIDR)
-		}
-		c.HTML(http.StatusOK, "index.html", gin.H{
-			"title":    "IP Blocklist Manager",
-			"result":   result,
-			"poolName": p.Name,
-			"comment":  p.Comment,
-			"status":   p.Status,
-			"BasePath": BasePath,
+		c.HTML(http.StatusOK, "found.html", gin.H{
+			"title":   "IP Blocklist Manager",
+			"result":  "Der Eintrag wurde gefunden",
+			"entries": entries,
 		})
 	})
+
 	r.POST("/reset", func(c *gin.Context) {
 		err := functions.ResetDB(database)
 		names, err := db.ListPoolNames(database)

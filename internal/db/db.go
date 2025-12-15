@@ -86,23 +86,28 @@ func InsertLutItem(dbConn *sql.DB, ip_addr string, name string) error {
 	return err
 }
 
-func FindPoolByIP(dbConn *sql.DB, ipUint uint32) (*PoolEntry, error) {
-	row := dbConn.QueryRow(`
-        SELECT id, start_ip_int, end_ip_int, cidr, name, comment, status
-        FROM pools
-        WHERE ? BETWEEN start_ip_int AND end_ip_int
-        ORDER BY end_ip_int - start_ip_int ASC
-        LIMIT 1
-    `, ipUint)
-
-	p := &PoolEntry{}
-	if err := row.Scan(&p.ID, &p.StartIPInt, &p.EndIPInt, &p.CIDR, &p.Name, &p.Comment, &p.Status); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
+func FindPoolByIP(dbConn *sql.DB, ipUint uint32) ([]PoolEntry, error) {
+	app.LogIt.Debug(fmt.Sprintf("trying to find %v", ipUint))
+	rows, err := dbConn.Query(`
+	       SELECT id, start_ip_int, end_ip_int, cidr, name, comment, status
+	       FROM pools
+	       WHERE ? BETWEEN start_ip_int AND end_ip_int
+	       ORDER BY end_ip_int - start_ip_int ASC
+	   `, ipUint)
+	if err != nil {
 		return nil, err
 	}
-	return p, nil
+	defer rows.Close()
+	var res []PoolEntry
+	for rows.Next() {
+		var p PoolEntry
+		if err := rows.Scan(&p.ID, &p.StartIPInt, &p.EndIPInt, &p.CIDR, &p.Name, &p.Comment, &p.Status); err != nil {
+			return nil, err
+		}
+		res = append(res, p)
+	}
+	app.LogIt.Debug(fmt.Sprintf("found %d entries", len(res)))
+	return res, rows.Err()
 }
 
 func ListByPool(dbConn *sql.DB, poolName string) ([]PoolEntry, error) {
