@@ -63,9 +63,10 @@ type PoolEntry struct {
 
 func GetStatusCount(entries []db.Pool) (wCount int, bCount int) {
 	for _, e := range entries {
-		if e.Status == "w" {
+		switch e.Status {
+		case "w":
 			wCount++
-		} else if e.Status == "b" {
+		case "b":
 			bCount++
 		}
 	}
@@ -250,7 +251,7 @@ func LoadLuts(database *sql.DB, folder string) error {
 				app.LogIt.Error(fmt.Sprintf("Fehler beim Öffnen von %s: %v", ipList.Name(), err))
 				fmt.Printf("Fehler beim Öffnen von %s: %v\n", ipList.Name(), err)
 			} else {
-				_, err = ImportLut(database, file)
+				_, err = ImportLut(database, file, ipList.Name())
 				if err != nil {
 					app.LogIt.Error("Fehler beim importieren von %s: %v", ipList.Name(), err)
 				}
@@ -263,7 +264,7 @@ func LoadLuts(database *sql.DB, folder string) error {
 	return err
 }
 
-func ImportLut(database *sql.DB, file io.Reader) (int, error) {
+func ImportLut(database *sql.DB, file io.Reader, fileName string) (int, error) {
 	reader := csv.NewReader(file)
 	// Optional: Konfiguration
 	reader.Comma = ','          // Trennzeichen
@@ -290,10 +291,10 @@ func ImportLut(database *sql.DB, file io.Reader) (int, error) {
 			return lineNumber, fmt.Errorf("Fehler beim Import von Zeile %d: %s,%s :: %w", lineNumber, record[0], record[1], err)
 		} else {
 			if lineNumber%1000 == 0 {
-				app.LogIt.Info(fmt.Sprintf("%d Zeilen von %s geladen", lineNumber, file))
+				app.LogIt.Info(fmt.Sprintf("%d Zeilen von %s geladen", lineNumber, fileName))
 			}
 			if lineNumber%10000 == 0 {
-				fmt.Printf("%d Zeilen von %s geladen\n", lineNumber, file)
+				fmt.Printf("%d Zeilen von %s geladen\n", lineNumber, fileName)
 			}
 		}
 	}
