@@ -244,7 +244,7 @@ func LoadLuts(database *sql.DB, folder string) error {
 
 	for _, ipList := range csvFiles {
 		if filepath.Ext(ipList.Name()) == ".txt" {
-			app.LogIt.Debug("found " + ipList.Name() + " in " + folder)
+			app.LogIt.Info("bearbeite " + ipList.Name() + " in " + folder)
 			file, err := os.Open(folder + ipList.Name())
 			if err != nil {
 				app.LogIt.Error(fmt.Sprintf("Fehler beim Öffnen von %s: %v", ipList.Name(), err))
@@ -253,6 +253,8 @@ func LoadLuts(database *sql.DB, folder string) error {
 				_, err = ImportLut(database, file)
 			}
 			defer file.Close()
+		} else {
+			app.LogIt.Info(ipList.Name() + "ist keine .txt - Datei")
 		}
 	}
 	return err
