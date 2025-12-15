@@ -251,6 +251,9 @@ func LoadLuts(database *sql.DB, folder string) error {
 				fmt.Printf("Fehler beim Öffnen von %s: %v\n", ipList.Name(), err)
 			} else {
 				_, err = ImportLut(database, file)
+				if err != nil {
+					app.LogIt.Error("Fehler beim importieren von %s: %v", ipList.Name(), err)
+				}
 			}
 			defer file.Close()
 		} else {
