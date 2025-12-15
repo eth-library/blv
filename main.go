@@ -67,8 +67,8 @@ func main() {
 			fmt.Println("werde die Lut-Einträge von ", *LutFolder, " laden")
 			app.LogIt.Info("werde die Lut-Einträge von ", *LutFolder, " laden")
 			helpers.Checknaddtrailingslash(LutFolder)
-			if err := functions.LoadLuts(database, *LutFolder); err != nil {
-				log.Fatalf("Fehler beim Laden der Luts von %s: %s", *LutFolder, err)
+			if errLL := functions.LoadLuts(database, *LutFolder); errLL != nil {
+				log.Fatalf("Fehler beim Laden der Luts von %s: %v", *LutFolder, errLL)
 			}
 		} else if *Reset {
 			app.LogIt.Info("Die DB wird nun zurückgesetzt und die Apache-Listen neu geladen - was kann etwas dauern.")
