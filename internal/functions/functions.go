@@ -61,12 +61,7 @@ func ImportConf(database *sql.DB, r io.Reader, poolName string, status string) (
 	return imported, nil
 }
 
-type PoolEntry struct {
-	CIDR    string
-	Comment string
-}
-
-func GetStatusCount(entries []db.Pool) (wCount int, bCount int) {
+func GetStatusCount(entries []db.PoolEntry) (wCount int, bCount int) {
 	for _, e := range entries {
 		switch e.Status {
 		case "w":

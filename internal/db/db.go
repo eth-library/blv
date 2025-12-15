@@ -12,7 +12,7 @@ import (
 	"github.com/SvenKethz/blv/internal/helpers"
 )
 
-type Pool struct {
+type PoolEntry struct {
 	ID         int
 	StartIPInt uint32
 	EndIPInt   uint32
@@ -86,7 +86,7 @@ func InsertLutItem(dbConn *sql.DB, ip_addr string, name string) error {
 	return err
 }
 
-func FindPoolByIP(dbConn *sql.DB, ipUint uint32) (*Pool, error) {
+func FindPoolByIP(dbConn *sql.DB, ipUint uint32) (*PoolEntry, error) {
 	row := dbConn.QueryRow(`
         SELECT id, start_ip_int, end_ip_int, cidr, name, comment, status
         FROM pools
@@ -95,7 +95,7 @@ func FindPoolByIP(dbConn *sql.DB, ipUint uint32) (*Pool, error) {
         LIMIT 1
     `, ipUint)
 
-	p := &Pool{}
+	p := &PoolEntry{}
 	if err := row.Scan(&p.ID, &p.StartIPInt, &p.EndIPInt, &p.CIDR, &p.Name, &p.Comment, &p.Status); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -105,7 +105,7 @@ func FindPoolByIP(dbConn *sql.DB, ipUint uint32) (*Pool, error) {
 	return p, nil
 }
 
-func ListByPool(dbConn *sql.DB, poolName string) ([]Pool, error) {
+func ListByPool(dbConn *sql.DB, poolName string) ([]PoolEntry, error) {
 	rows, err := dbConn.Query(`
         SELECT id, start_ip_int, end_ip_int, cidr, name, comment, status
         FROM pools
@@ -117,9 +117,9 @@ func ListByPool(dbConn *sql.DB, poolName string) ([]Pool, error) {
 	}
 	defer rows.Close()
 
-	var res []Pool
+	var res []PoolEntry
 	for rows.Next() {
-		var p Pool
+		var p PoolEntry
 		if err := rows.Scan(&p.ID, &p.StartIPInt, &p.EndIPInt, &p.CIDR, &p.Name, &p.Comment, &p.Status); err != nil {
 			return nil, err
 		}
