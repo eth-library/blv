@@ -149,7 +149,7 @@ func ExportConf(database *sql.DB, poolName string) (wExported int, bExported int
 func InitDB(database *sql.DB) error {
 	err := db.CreateTables(database)
 	if err != nil {
-		app.LogIt.Error("Fehler beim Anlegen der Datenbank: %v", err)
+		app.LogIt.Error(fmt.Sprintf("Fehler beim Anlegen der Datenbank: %v", err))
 	}
 	return err
 }
@@ -158,15 +158,15 @@ func ResetDB(database *sql.DB) error {
 	ExportDB(database)
 	err := db.CleanDB(database)
 	if err != nil {
-		app.LogIt.Error("Fehler beim Putzen der Datenbank: %v", err)
+		app.LogIt.Error(fmt.Sprintf("Fehler beim Putzen der Datenbank: %v", err))
 	}
 	err = db.CreateTables(database)
 	if err != nil {
-		app.LogIt.Error("Fehler beim Anlegen der Datenbank: %v", err)
+		app.LogIt.Error(fmt.Sprintf("Fehler beim Anlegen der Datenbank: %v", err))
 	}
 	err = LoadApacheLists(database)
 	if err != nil {
-		app.LogIt.Error("Fehler beim Laden der ApacheBlocklisten %v", err)
+		app.LogIt.Error(fmt.Sprintf("Fehler beim Laden der ApacheBlocklisten %v", err))
 	}
 	return err
 }
@@ -174,7 +174,7 @@ func ResetDB(database *sql.DB) error {
 func ExportDB(database *sql.DB) {
 	pools, err := db.ListPoolNames(database)
 	if err != nil {
-		app.LogIt.Error("Fehler beim Lesen der Pools: %v", err)
+		app.LogIt.Error(fmt.Sprintf("Fehler beim Lesen der Pools: %v", err))
 	}
 	for _, pool := range pools {
 		outputFilePath := app.Config.OutputPath + pool + ".conf"
@@ -270,7 +270,7 @@ func ImportLut(database *sql.DB, file io.Reader) (int, error) {
 			break // Ende der Datei erreicht
 		}
 		if err != nil {
-			app.LogIt.Error("Fehler in Zeile %d: %v", lineNumber, err)
+			app.LogIt.Error(fmt.Sprintf("Fehler in Zeile %d: %v", lineNumber, err))
 			continue // Überspringe fehlerhafte Zeilen
 		}
 
@@ -279,10 +279,16 @@ func ImportLut(database *sql.DB, file io.Reader) (int, error) {
 		// Verarbeite die Zeile
 		if err := db.InsertLutItem(database, record[0], record[1]); err != nil {
 			return lineNumber, fmt.Errorf("Fehler beim Import von Zeile %d: %s,%s :: %w", lineNumber, record[0], record[1], err)
+		} else {
+			if lineNumber%1000 == 0 {
+				app.LogIt.Info(fmt.Sprintf("%d Zeilen von %s geladen", lineNumber, file))
+			}
+			if lineNumber%10000 == 0 {
+				fmt.Printf("%d Zeilen von %s geladen\n", lineNumber, file)
+			}
 		}
 	}
 
 	fmt.Printf("Verarbeitet: %d Zeilen\n", lineNumber)
 	return lineNumber, nil
 }
-

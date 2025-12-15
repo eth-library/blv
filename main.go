@@ -64,14 +64,13 @@ func main() {
 		defer database.Close()
 
 		if helpers.FlagIsPassed("lf") {
-			fmt.Println("werde die Lut-Einträge von %s laden", *LutFolder)
-			app.LogIt.Info("werde die Lut-Einträge von %s laden", *LutFolder)
+			fmt.Println("werde die Lut-Einträge von ", *LutFolder, " laden")
+			app.LogIt.Info("werde die Lut-Einträge von ", *LutFolder, " laden")
 			helpers.Checknaddtrailingslash(LutFolder)
 			if err := functions.LoadLuts(database, *LutFolder); err != nil {
 				log.Fatalf("Fehler beim Laden der Luts von %s: %s", *LutFolder, err)
 			}
-		}
-		if *Reset {
+		} else if *Reset {
 			app.LogIt.Info("Die DB wird nun zurückgesetzt und die Apache-Listen neu geladen - was kann etwas dauern.")
 			fmt.Println("Die DB wird nun zurückgesetzt und die Apache-Listen neu geladen - was kann etwas dauern.")
 			functions.ResetDB(database)
