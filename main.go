@@ -17,6 +17,7 @@ var (
 	_, ApplicationName = helpers.SeparateFileFromPath(os.Args[0])
 	ConfigPath         = flag.String("c", "/etc/blv/conf.d/blv.yml", "use -c to provide a custom path to the config file")
 	DBinit             = flag.Bool("init", false, "Neuaufbau der Datenbank erzwingen")
+	LutFolder          = flag.String("lf", "./luts", "IP-Host-Listen laden")
 	Reset              = flag.Bool("reset", false, "Neuaufbau der Datenbank erzwingen")
 )
 
@@ -62,6 +63,14 @@ func main() {
 		}
 		defer database.Close()
 
+		if helpers.FlagIsPassed("lf") {
+			fmt.Println("werde die Lut-Einträge von %s laden", *LutFolder)
+			app.LogIt.Info("werde die Lut-Einträge von %s laden", *LutFolder)
+			helpers.Checknaddtrailingslash(LutFolder)
+			if err := functions.LoadLuts(database, *LutFolder); err != nil {
+				log.Fatalf("Fehler beim Laden der Luts von %s: %s", *LutFolder, err)
+			}
+		}
 		if *Reset {
 			app.LogIt.Info("Die DB wird nun zurückgesetzt und die Apache-Listen neu geladen - was kann etwas dauern.")
 			fmt.Println("Die DB wird nun zurückgesetzt und die Apache-Listen neu geladen - was kann etwas dauern.")
