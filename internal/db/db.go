@@ -77,12 +77,9 @@ func InsertPool(dbConn *sql.DB, cidrString, name string, comment string, status 
 }
 
 func InsertLutItem(dbConn *sql.DB, ip_addr string, name string) error {
-	_, ipNet, err := net.ParseCIDR(ip_addr)
-	if err != nil {
-		return err
-	}
-	ip_int := helpers.IPToUint32(ipNet.IP)
-	_, err = dbConn.Exec(
+	ipNet := net.ParseIP(ip_addr)
+	ip_int := helpers.IPToUint32(ipNet)
+	_, err := dbConn.Exec(
 		"INSERT INTO lut(ip_int, name) VALUES(?, ?)",
 		ip_int, name,
 	)
