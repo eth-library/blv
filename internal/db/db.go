@@ -49,6 +49,12 @@ func CreateTables(database *sql.DB) error {
 	       status TEXT
 	   );
 	   CREATE INDEX IF NOT EXISTS idx_ip_range ON pools (start_ip_int, end_ip_int);
+	   CREATE TABLE IF NOT EXISTS lut (
+	       id INTEGER PRIMARY KEY AUTOINCREMENT,
+	       ip_int INTEGER NOT NULL,
+	       name TEXT
+	   );
+	   CREATE INDEX IF NOT EXISTS host_name ON lut (name);
 	   `
 	_, err := database.Exec(sqlStmt)
 	return err
