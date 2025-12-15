@@ -254,6 +254,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			poolName = "default"
 		}
 
+
 		f, err := fileHeader.Open()
 		if err != nil {
 			c.HTML(http.StatusInternalServerError, "index.html", gin.H{
@@ -265,7 +266,9 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 		}
 		defer f.Close()
 
-		count, err := functions.ImportConf(database, f, poolName, "b")
+		zielStatus := c.PostForm("zielStatus")
+
+		count, err := functions.ImportConf(database, f, poolName, zielStatus)
 		if err != nil {
 			c.HTML(http.StatusInternalServerError, "index.html", gin.H{
 				"title":    "IP Blocklist Manager",

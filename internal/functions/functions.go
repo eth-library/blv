@@ -198,6 +198,8 @@ func LoadApacheLists(database *sql.DB) error {
 	}
 
 	for _, conf := range entries {
+		app.LogIt.Info("lade " + conf.Name())
+		fmt.Println("lade", conf.Name())
 		if filepath.Ext(conf.Name()) == ".conf" {
 			app.LogIt.Debug("found " + conf.Name() + " in " + app.Config.BlocklistPath)
 			file, err := os.Open(app.Config.BlocklistPath + conf.Name())
