@@ -83,9 +83,10 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 		}
 
 		var result string
-		if p.Status == "w" {
+		switch p.Status {
+		case "w":
 			result = fmt.Sprintf("IP %s ist whitelisted (CIDR: %s).", ipStr, p.CIDR)
-		} else if p.Status == "b" {
+		case "b":
 			result = fmt.Sprintf("IP %s ist geblockt (CIDR: %s).", ipStr, p.CIDR)
 		}
 		c.HTML(http.StatusOK, "index.html", gin.H{
@@ -174,14 +175,14 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	r.POST("/pools/:name/whitelist", func(c *gin.Context) {
 		poolName := c.Param("name")
 		_ = db.WhitelistPool(database, poolName)
-		c.Redirect(http.StatusSeeOther, BasePath+"/pools/")
+		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
 	})
 
 	// Pool blocken
 	r.POST("/pools/:name/block", func(c *gin.Context) {
 		poolName := c.Param("name")
 		_ = db.BlockPool(database, poolName)
-		c.Redirect(http.StatusSeeOther, BasePath+"/pools/")
+		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
 	})
 
 	// Pool löschen
@@ -253,7 +254,6 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 		if poolName == "" {
 			poolName = "default"
 		}
-
 
 		f, err := fileHeader.Open()
 		if err != nil {
