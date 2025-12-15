@@ -75,6 +75,19 @@ func InsertPool(dbConn *sql.DB, cidrString, name string, comment string, status 
 	return err
 }
 
+func BuildLut(dbConn *sql.DB, ip_addr string, name string) error {
+	_, ipNet, err := net.ParseCIDR(ip_addr)
+	if err != nil {
+		return 0, 0, err
+	}
+	ip_int := IPToUint32(ipNet.IP)
+	_, err = dbConn.Exec(
+		"INSERT INTO lut(ip_int, name) VALUES(?, ?)",
+		ip_int, name,
+	)
+	return err
+}
+
 func FindPoolByIP(dbConn *sql.DB, ipUint uint32) (*Pool, error) {
 	row := dbConn.QueryRow(`
         SELECT id, start_ip_int, end_ip_int, cidr, name, comment, status
