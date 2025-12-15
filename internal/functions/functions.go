@@ -232,11 +232,14 @@ func LoadApacheLists(database *sql.DB) error {
 }
 
 func LoadLuts(database *sql.DB, folder string) error {
-	app.LogIt.Info("importing csv files from ", folder, " into db.lut")
+	app.LogIt.Info("importiere csv files von ", folder, " in die db.lut")
 
 	csvFiles, err := os.ReadDir(folder)
 	if err != nil {
 		app.LogIt.Error(fmt.Sprintf("Fehler beim Lesen der csv files: %v", err))
+	} else {
+		app.LogIt.Info(fmt.Sprintf("%d Dateien in %s gefunden", len(csvFiles), folder))
+		fmt.Printf("%d Dateien in %s gefunden\n", len(csvFiles), folder)
 	}
 
 	for _, ipList := range csvFiles {
