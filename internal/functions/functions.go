@@ -44,7 +44,7 @@ func ImportConf(database *sql.DB, r io.Reader, poolName string, status string) (
 				cidr = part
 			}
 		}
-		// TODO: Hier Prüfung rein, ob CIDR schon existiert...
+		// TODO: Hier Prüfung rein, ob CIDR schon existiert... (FindPoolByIP)
 		// Was ist dann zu tun? Existierenden Status übernehmen?
 		// Wie prüfe ich Dopplungen und löse sie auf? (ggfs welche, die sich sogar widersprechen)
 		// --> existierende CIDR in einer Seite auflisten mit Lösungsmöglichkeiten
