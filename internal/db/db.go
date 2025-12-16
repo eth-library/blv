@@ -77,6 +77,9 @@ func InsertEntry(dbConn *sql.DB, cidrString, name, comment, status string) (*Poo
 	if foundEntry, _ := FindPoolByIP(dbConn, startIP); foundEntry != nil {
 		return foundEntry, nil
 	}
+	if foundEntry, _ := FindPoolByIP(dbConn, endIP); foundEntry != nil {
+		return foundEntry, nil
+	}
 	_, err = dbConn.Exec(
 		"INSERT INTO pools(start_ip_int, end_ip_int, cidr, name, comment, status) VALUES(?, ?, ?, ?, ?, ?)",
 		startIP, endIP, cidrString, name, comment, status,

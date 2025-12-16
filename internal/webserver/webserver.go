@@ -298,7 +298,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 
 		zielStatus := c.PostForm("zielStatus")
 
-		existingEntries, err := functions.ImportConf(database, f, poolName, zielStatus)
+		existingEntry, err := functions.ImportConf(database, f, poolName, zielStatus)
 		if err != nil {
 			c.HTML(http.StatusInternalServerError, "index.html", gin.H{
 				"title":    "IP Blocklist Manager",
@@ -307,16 +307,25 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			})
 			return
 		}
-		if existingEntries != nil {
-			c.HTML(http.StatusInternalServerError, "found.html", gin.H{
-				"title":   "IP Blocklist Manager",
-				"error":   "mindestens ein Eintrag wurde gefunden und deshalb nicht hinzugefügt.",
-				"message": "mindestens ein Eintrag wurde gefunden und deshalb nicht hinzugefügt.",
-				"entries": existingEntries,
+		if existingEntry != nil {
+			var result string
+			switch existingEntry.Status {
+			case "w":
+				result = fmt.Sprintf("CIDR %s ist whitelisted und wird nicht hinzugefügt", existingEntry.CIDR)
+			case "b":
+				result = fmt.Sprintf("CIDR %s ist geblockt und wird nicht hinzugefügt", existingEntry.CIDR)
+			}
+			names, _ := db.ListPoolNames(database)
+			c.HTML(http.StatusOK, "pools.html", gin.H{
+				"title":    "IP Blocklist Manager",
+				"error":    result,
+				"poolName": existingEntry.Name,
+				"comment":  existingEntry.Comment,
+				"status":   existingEntry.Status,
+				"pools":    names,
+				"BasePath": BasePath,
 			})
-			return
 		}
-
 		names, err := db.ListPoolNames(database)
 		c.HTML(http.StatusOK, "pools.html", gin.H{
 			"title":    "IP Blocklist Manager",
