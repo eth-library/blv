@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	app "github.com/SvenKethz/blv/internal/configuration"
 	"github.com/SvenKethz/blv/internal/db"
@@ -80,10 +81,11 @@ func ExportConf(database *sql.DB, poolName string) (wExported int, bExported int
 	wCount, bCount := GetStatusCount(entries)
 	wExported = 0
 	bExported = 0
+	today := time.Now().Format("2006-01-02")
 
 	if wCount > 0 {
 		// Datei anlegen/überschreiben
-		whitelistFile, err := os.Create(app.Config.OutputPath + "whitelists/" + poolName + ".conf")
+		whitelistFile, err := os.Create(app.Config.OutputPath + "whitelists/" + poolName + ".conf_" + today)
 		if err != nil {
 			return 0, 0, fmt.Errorf("konnte Datei nicht erstellen: %w", err)
 		}
@@ -115,7 +117,7 @@ func ExportConf(database *sql.DB, poolName string) (wExported int, bExported int
 	}
 	if bCount > 0 {
 		// Datei anlegen/überschreiben
-		blocklistFile, err := os.Create(app.Config.OutputPath + "blocklists/" + poolName + ".conf")
+		blocklistFile, err := os.Create(app.Config.OutputPath + "blocklists/" + poolName + ".conf_" + today)
 		if err != nil {
 			return 0, 0, fmt.Errorf("konnte Datei nicht erstellen: %w", err)
 		}
