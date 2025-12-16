@@ -25,12 +25,8 @@
         {{ end }}
 
         {{ if .message }}
-        <div class="alert alert-success">{{ .message }}</div>
-        {{ end }}
-
-        {{ if .result }}
           <div class="alert alert-info">
-            <p>{{ .result }}</p>
+            <p>{{ .message }}</p>
             {{ if .poolName }}
               <p>Pool: <a href="{{ $.BasePath }}/pools/{{ .poolName }}">{{ .poolName }}</a></p>
               <p>Kommentar: {{ .comment }}</p>

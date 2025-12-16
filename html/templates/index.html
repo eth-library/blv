@@ -24,16 +24,12 @@
         {{ end }}
 
         {{ if .message }}
-        <div class="alert alert-success">{{ .message }}</div>
-        {{ end }}
-
-        {{ if .result }}
         {{ if eq .status "w" }}
           <div class="alert alert-success">
         {{ else }}
           <div class="alert alert-info">
         {{ end }}
-            <p>{{ .result }}</p>
+            <p>{{ .message }}</p>
             {{ if .poolName }}
               <p>Pool: <a href="{{$.BasePath}}/pools/{{ .poolName }}">{{ .poolName }}</a></p>
               <p>Kommentar: {{ .comment }}</p>

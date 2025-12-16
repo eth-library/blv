@@ -22,7 +22,13 @@
 
       {{ if .error }}
       <section class="status">
-        <div class="alert alert-error">{{ .error }}</div>
+        <div class="alert alert-error">
+          <p>{{ .error }}</p>
+          {{ if .poolName }}
+              <p>Pool: <a href="{{$.BasePath}}/pools/{{ .poolName }}">{{ .poolName }}</a></p>
+              <p>Kommentar: {{ .comment }}</p>
+            {{ end }}
+        </div>
       </section>
       {{ end }}
       {{ if .message }}
