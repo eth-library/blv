@@ -45,7 +45,7 @@
             <tbody>
             {{ range .entries }}
               <tr>
-                <td>{{ .Name }}</td><td>{{ .CIDR }}</td><td>{{ .Status }}</td>
+                <td><a href="{{ $.BasePath }}/pools/{{ .Name }}">{{ .Name }}</a></td><td>{{ .CIDR }}</td><td>{{ .Status }}</td>
               </tr>
             {{ end }}
           </tbody>

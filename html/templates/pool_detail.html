@@ -64,32 +64,32 @@
                 {{ if eq .Status  "b" }}
                 <td>
                   <form method="post" action="{{ $.BasePath }}/pools/{{ $.pool }}/whitelistIP">
-                    <input type="hidden" name="cidr" value="{{ .CIDR }}">
+                    <input type="hidden" name="entryID" value="{{ .ID }}">
                     <button type="submit" class="btn-green">whitelisten</button>
                   </form>
                 </td>
                 {{ else if eq .Status "w" }}
                 <td>
                   <form method="post" action="{{ $.BasePath }}/pools/{{ $.pool }}/blockIP">
-                    <input type="hidden" name="cidr" value="{{ .CIDR }}">
+                    <input type="hidden" name="entryID" value="{{ .ID }}">
                     <button type="submit" class="btn-grey">blocken</button>
                   </form>
                 </td>
                 {{ else }}
                 <td>
                   <form method="post" action="{{ $.BasePath }}/pools/{{ $.pool }}/whitelistIP">
-                    <input type="hidden" name="cidr" value="{{ .CIDR }}">
+                    <input type="hidden" name="entryID" value="{{ .ID }}">
                     <button type="submit" class="btn-green">whitelisten</button>
                   </form>
                   <form method="post" action="{{ $.BasePath }}/pools/{{ $.pool }}/blockIP">
-                    <input type="hidden" name="cidr" value="{{ .CIDR }}">
+                    <input type="hidden" name="entryID" value="{{ .ID }}">
                     <button type="submit" class="btn-grey">blocken</button>
                   </form>
                 </td>
                 {{ end }}
                 <td>
                   <form method="post" action="{{ $.BasePath }}/pools/{{ $.pool }}/deleteIP">
-                    <input type="hidden" name="cidr" value="{{ .CIDR }}">
+                    <input type="hidden" name="entryID" value="{{ .ID }}">
                     <button type="submit" class="btn-danger">Löschen</button>
                   </form>
                 </td>

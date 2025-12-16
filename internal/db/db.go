@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"net"
+	"regexp"
 
 	// _ "github.com/mattn/go-sqlite3"
 	_ "modernc.org/sqlite"
@@ -61,9 +62,13 @@ func CreateTables(database *sql.DB) error {
 	return err
 }
 
-func InsertPool(dbConn *sql.DB, cidrString, name string, comment string, status string) error {
+func InsertPool(dbConn *sql.DB, cidrString, name, comment, status string) error {
 	if len(comment) > 60 {
 		comment = comment[:60]
+	}
+	re := regexp.MustCompile(`/\d{1,2}$`)
+	if !re.MatchString(cidrString) {
+		cidrString += "/32"
 	}
 	startIP, endIP, err := helpers.GetIPRange(cidrString)
 	if err != nil {
@@ -152,21 +157,18 @@ func ListPoolNames(dbConn *sql.DB) ([]string, error) {
 	return names, rows.Err()
 }
 
-// Einen Eintrag per CIDR und Pool whitelisten
-func WhitelistByPoolAndCIDR(dbConn *sql.DB, poolName, cidr string) error {
-	_, err := dbConn.Exec(`UPDATE pools SET status = "w" WHERE name = ? AND cidr = ?`, poolName, cidr)
+func WhitelistByID(dbConn *sql.DB, entryID string) error {
+	_, err := dbConn.Exec(`UPDATE pools SET status = "w" WHERE id = ?`, entryID)
 	return err
 }
 
-// Einen Eintrag per CIDR und Pool blocken
-func BlockByPoolAndCIDR(dbConn *sql.DB, poolName, cidr string) error {
-	_, err := dbConn.Exec(`UPDATE pools SET status = "b" WHERE name = ? AND cidr = ?`, poolName, cidr)
+func BlockByID(dbConn *sql.DB, entryID string) error {
+	_, err := dbConn.Exec(`UPDATE pools SET status = "b" WHERE id = ?`, entryID)
 	return err
 }
 
-// Einen Eintrag per CIDR und Pool löschen
-func DeleteByPoolAndCIDR(dbConn *sql.DB, poolName, cidr string) error {
-	_, err := dbConn.Exec(`DELETE FROM pools WHERE name = ? AND cidr = ?`, poolName, cidr)
+func DeleteByID(dbConn *sql.DB, entryID string) error {
+	_, err := dbConn.Exec(`DELETE FROM pools WHERE id = ?`, entryID)
 	return err
 }
 

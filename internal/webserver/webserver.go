@@ -131,7 +131,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			})
 			return
 		}
-		errCode := c.Query("err")
+		errCode := c.Query("error")
 
 		c.HTML(http.StatusOK, "pool_detail.html", gin.H{
 			"title":    "Pool " + poolName,
@@ -189,11 +189,11 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 		cidr := strings.TrimSpace(c.PostForm("cidr"))
 		comment := strings.TrimSpace(c.PostForm("comment"))
 		if cidr == "" {
-			c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+"?err=cidr_empty")
+			c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+"?error=cidr_empty")
 			return
 		}
 		if err := db.InsertPool(database, cidr, poolName, comment, "b"); err != nil {
-			c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+"?err="+err.Error())
+			c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+"?error="+err.Error())
 			return
 		}
 		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
@@ -202,29 +202,41 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	// Eintrag whitelisten
 	r.POST("/pools/:name/whitelistIP", func(c *gin.Context) {
 		poolName := c.Param("name")
-		cidr := c.PostForm("cidr")
-		if cidr != "" {
-			_ = db.WhitelistByPoolAndCIDR(database, poolName, cidr)
+		entryID := c.PostForm("entryID")
+		var m string
+		if entryID != "" {
+			if err := db.WhitelistByID(database, entryID); err != nil {
+				app.LogIt.Debug(fmt.Sprintf("Fehler beim Whitelisten der ID %s : %v", entryID, err))
+			}
+		} else {
+			m = "?error=Fehler beim Whitelisten - keine ID übergeben"
+			app.LogIt.Debug(m)
 		}
-		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
+		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+m)
 	})
 
 	// Eintrag blocken
 	r.POST("/pools/:name/blockIP", func(c *gin.Context) {
 		poolName := c.Param("name")
-		cidr := c.PostForm("cidr")
-		if cidr != "" {
-			_ = db.BlockByPoolAndCIDR(database, poolName, cidr)
+		entryID := c.PostForm("entryID")
+		var m string
+		if entryID != "" {
+			if err := db.BlockByID(database, entryID); err != nil {
+				app.LogIt.Debug(fmt.Sprintf("Fehler beim Blocken der ID %s : %v", entryID, err))
+			}
+		} else {
+			m = "?error=Fehler beim Blocken - keine ID übergeben"
+			app.LogIt.Debug(m)
 		}
-		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
+		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+m)
 	})
 
 	// Eintrag löschen
 	r.POST("/pools/:name/deleteIP", func(c *gin.Context) {
 		poolName := c.Param("name")
-		cidr := c.PostForm("cidr")
-		if cidr != "" {
-			_ = db.DeleteByPoolAndCIDR(database, poolName, cidr)
+		entryID := c.PostForm("entryID")
+		if entryID != "" {
+			_ = db.DeleteByID(database, entryID)
 		}
 		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
 	})
