@@ -44,13 +44,16 @@ func ImportConf(database *sql.DB, r io.Reader, poolName string, status string) (
 				cidr = part
 			}
 		}
-		// TODO: Hier Prüfung rein, ob CIDR schon existiert... (FindPoolByIP)
+		// TODO: Hier die Prüfung, ob CIDR schon existiert... (existingentries)
 		// Was ist dann zu tun? Existierenden Status übernehmen?
 		// Wie prüfe ich Dopplungen und löse sie auf? (ggfs welche, die sich sogar widersprechen)
 		// --> existierende CIDR in einer Seite auflisten mit Lösungsmöglichkeiten
 		// Möglichkeit zum DB-Dopplungs-Check (also auch für existierende Einträge) bauen?
-		if err := db.InsertPool(database, cidr, poolName, comment, status); err != nil {
+		existingEntries, err := db.InsertEntry(database, cidr, poolName, comment, status)
+		if err != nil {
 			return imported, fmt.Errorf("Fehler beim Import von %s: %w", cidr, err)
+		}
+		if existingEntries != nil {
 		}
 		imported++
 	}

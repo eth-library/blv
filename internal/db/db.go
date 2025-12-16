@@ -62,23 +62,32 @@ func CreateTables(database *sql.DB) error {
 	return err
 }
 
-func InsertPool(dbConn *sql.DB, cidrString, name, comment, status string) error {
+func InsertEntry(dbConn *sql.DB, cidrString, name, comment, status string) ([]PoolEntry, error) {
 	if len(comment) > 60 {
 		comment = comment[:60]
 	}
+	var entries []PoolEntry
 	re := regexp.MustCompile(`/\d{1,2}$`)
 	if !re.MatchString(cidrString) {
 		cidrString += "/32"
 	}
 	startIP, endIP, err := helpers.GetIPRange(cidrString)
 	if err != nil {
-		return fmt.Errorf("ungültiger CIDR %s: %w", cidrString, err)
+		return entries, fmt.Errorf("ungültiger CIDR %s: %w", cidrString, err)
 	}
-	_, err = dbConn.Exec(
-		"INSERT INTO pools(start_ip_int, end_ip_int, cidr, name, comment, status) VALUES(?, ?, ?, ?, ?, ?)",
-		startIP, endIP, cidrString, name, comment, status,
-	)
-	return err
+	for ipAddr := startIP; ipAddr <= endIP; ipAddr++ {
+		foundEntries, _ := FindPoolByIP(dbConn, ipAddr)
+		entries = append(entries, foundEntries...)
+	}
+	if entries != nil {
+		return entries, err
+	} else {
+		_, err = dbConn.Exec(
+			"INSERT INTO pools(start_ip_int, end_ip_int, cidr, name, comment, status) VALUES(?, ?, ?, ?, ?, ?)",
+			startIP, endIP, cidrString, name, comment, status,
+		)
+	}
+	return entries, err
 }
 
 func InsertLutItem(dbConn *sql.DB, ip_addr string, name string) error {

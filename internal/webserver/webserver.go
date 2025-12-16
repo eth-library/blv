@@ -192,9 +192,17 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+"?error=cidr_empty")
 			return
 		}
-		if err := db.InsertPool(database, cidr, poolName, comment, "b"); err != nil {
+		existingEntries, err := db.InsertEntry(database, cidr, poolName, comment, "b")
+		if err != nil {
 			c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+"?error="+err.Error())
 			return
+		}
+		if existingEntries != nil {
+			c.HTML(http.StatusOK, "found.html", gin.H{
+				"title":   "IP Blocklist Manager",
+				"result":  "Der Eintrag wurde gefunden und deshalb nicht hinzugefügt.",
+				"entries": existingEntries,
+			})
 		}
 		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
 	})
