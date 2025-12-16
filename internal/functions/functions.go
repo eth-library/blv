@@ -15,9 +15,8 @@ import (
 	"github.com/SvenKethz/blv/internal/helpers"
 )
 
-func ImportConf(database *sql.DB, r io.Reader, poolName string, status string) (int, error) {
+func ImportConf(database *sql.DB, r io.Reader, poolName string, status string) (*db.PoolEntry, error) {
 	scanner := bufio.NewScanner(r)
-	imported := 0
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -49,19 +48,19 @@ func ImportConf(database *sql.DB, r io.Reader, poolName string, status string) (
 		// Wie prüfe ich Dopplungen und löse sie auf? (ggfs welche, die sich sogar widersprechen)
 		// --> existierende CIDR in einer Seite auflisten mit Lösungsmöglichkeiten
 		// Möglichkeit zum DB-Dopplungs-Check (also auch für existierende Einträge) bauen?
-		existingEntries, err := db.InsertEntry(database, cidr, poolName, comment, status)
+		existingEntry, err := db.InsertEntry(database, cidr, poolName, comment, status)
 		if err != nil {
-			return imported, fmt.Errorf("Fehler beim Import von %s: %w", cidr, err)
+			return nil, fmt.Errorf("Fehler beim Import von %s: %w", cidr, err)
 		}
-		if existingEntries != nil {
+		if existingEntry != nil {
+			return existingEntry, nil
 		}
-		imported++
 	}
 
 	if err := scanner.Err(); err != nil {
-		return imported, err
+		return nil, err
 	}
-	return imported, nil
+	return nil, nil
 }
 
 func GetStatusCount(entries []db.PoolEntry) (wCount int, bCount int) {

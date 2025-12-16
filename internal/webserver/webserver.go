@@ -63,7 +63,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			return
 		}
 
-		entries, err := db.FindPoolByIP(database, ipUint)
+		foundEntry, err := db.FindPoolByIP(database, ipUint)
 		if err != nil {
 			c.HTML(http.StatusInternalServerError, "index.html", gin.H{
 				"title":    "IP Blocklist Manager",
@@ -73,7 +73,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			return
 		}
 
-		if entries == nil {
+		if foundEntry == nil {
 			c.HTML(http.StatusOK, "index.html", gin.H{
 				"title":    "IP Blocklist Manager",
 				"result":   fmt.Sprintf("IP %s ist nicht registriert.", ipStr),
@@ -81,11 +81,20 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			})
 			return
 		}
-
-		c.HTML(http.StatusOK, "found.html", gin.H{
-			"title":   "IP Blocklist Manager",
-			"result":  "Der Eintrag wurde gefunden",
-			"entries": entries,
+		var result string
+		switch foundEntry.Status {
+		case "w":
+			result = fmt.Sprintf("IP %s ist whitelisted (CIDR: %s).", ipStr, foundEntry.CIDR)
+		case "b":
+			result = fmt.Sprintf("IP %s ist geblockt (CIDR: %s).", ipStr, foundEntry.CIDR)
+		}
+		c.HTML(http.StatusOK, "index.html", gin.H{
+			"title":    "IP Blocklist Manager",
+			"result":   result,
+			"poolName": foundEntry.Name,
+			"comment":  foundEntry.Comment,
+			"status":   foundEntry.Status,
+			"BasePath": BasePath,
 		})
 	})
 
@@ -279,7 +288,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 
 		zielStatus := c.PostForm("zielStatus")
 
-		count, err := functions.ImportConf(database, f, poolName, zielStatus)
+		existingEntries, err := functions.ImportConf(database, f, poolName, zielStatus)
 		if err != nil {
 			c.HTML(http.StatusInternalServerError, "index.html", gin.H{
 				"title":    "IP Blocklist Manager",
@@ -288,11 +297,20 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			})
 			return
 		}
+		if existingEntries != nil {
+			c.HTML(http.StatusInternalServerError, "found.html", gin.H{
+				"title":   "IP Blocklist Manager",
+				"error":   "mindestens ein Eintrag wurde gefunden und deshalb nicht hinzugefügt.",
+				"result":  "mindestens ein Eintrag wurde gefunden und deshalb nicht hinzugefügt.",
+				"entries": existingEntries,
+			})
+			return
+		}
 
 		names, err := db.ListPoolNames(database)
 		c.HTML(http.StatusOK, "pools.html", gin.H{
 			"title":    "IP Blocklist Manager",
-			"message":  fmt.Sprintf("Liste '%s' importiert, %d Einträge übernommen.", poolName, count),
+			"message":  fmt.Sprintf("Liste '%s' importiert.", poolName),
 			"pools":    names,
 			"BasePath": BasePath,
 		})
