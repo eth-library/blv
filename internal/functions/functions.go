@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	app "github.com/SvenKethz/blv/internal/configuration"
 	"github.com/SvenKethz/blv/internal/db"
@@ -73,7 +72,6 @@ func ExportConf(database *sql.DB, poolName string) (wExported int, bExported int
 	wCount, bCount := GetStatusCount(entries)
 	wExported = 0
 	bExported = 0
-	today := time.Now().Format("2006-01-02")
 
 	if wCount > 0 {
 		// Datei anlegen/überschreiben
@@ -194,14 +192,14 @@ func LoadApacheLists(database *sql.DB) error {
 	}
 
 	for _, conf := range entries {
-		app.LogIt.Info("lade " + conf.Name())
-		fmt.Println("lade", conf.Name())
 		if filepath.Ext(conf.Name()) == ".conf" {
 			app.LogIt.Debug("found " + conf.Name() + " in " + app.Config.BlocklistPath)
 			file, err := os.Open(app.Config.BlocklistPath + conf.Name())
 			if err != nil {
 				app.LogIt.Error(fmt.Sprintf("Fehler beim Öffnen von %s: %v", conf.Name(), err))
 			} else {
+				app.LogIt.Info("lade " + conf.Name())
+				fmt.Println("lade", conf.Name())
 				poolName := strings.TrimSuffix(conf.Name(), filepath.Ext(conf.Name()))
 				ImportConf(database, file, poolName, "b")
 			}
@@ -220,6 +218,8 @@ func LoadApacheLists(database *sql.DB) error {
 			if err != nil {
 				app.LogIt.Error(fmt.Sprintf("Fehler beim Öffnen von %s: %v", conf.Name(), err))
 			} else {
+				app.LogIt.Info("lade " + conf.Name())
+				fmt.Println("lade", conf.Name())
 				poolName := strings.TrimSuffix(conf.Name(), filepath.Ext(conf.Name()))
 				ImportConf(database, file, poolName, "w")
 			}
