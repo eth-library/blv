@@ -77,7 +77,7 @@ func ExportConf(database *sql.DB, poolName string) (wExported int, bExported int
 
 	if wCount > 0 {
 		// Datei anlegen/überschreiben
-		whitelistFile, err := os.Create(app.Config.OutputPath + "whitelists/" + poolName + ".conf_" + today)
+		whitelistFile, err := os.Create(app.Config.OutputPath + "whitelists/" + poolName + ".conf")
 		if err != nil {
 			return 0, 0, fmt.Errorf("konnte Datei nicht erstellen: %w", err)
 		}
@@ -109,7 +109,7 @@ func ExportConf(database *sql.DB, poolName string) (wExported int, bExported int
 	}
 	if bCount > 0 {
 		// Datei anlegen/überschreiben
-		blocklistFile, err := os.Create(app.Config.OutputPath + "blocklists/" + poolName + ".conf_" + today)
+		blocklistFile, err := os.Create(app.Config.OutputPath + "blocklists/" + poolName + ".conf")
 		if err != nil {
 			return 0, 0, fmt.Errorf("konnte Datei nicht erstellen: %w", err)
 		}

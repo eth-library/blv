@@ -93,7 +93,7 @@ func InsertPoollistEntry(dbConn *sql.DB, cidrString, name, comment, status strin
 	if len(comment) > 60 {
 		comment = comment[:60]
 	}
-	if !strings.Contains(cidrString, "") {
+	if !strings.Contains(cidrString, "/") {
 		cidrString += "/32"
 	}
 	startIP, endIP, err := helpers.GetIPRange(cidrString)
@@ -166,7 +166,7 @@ func ListByPool(dbConn *sql.DB, poolName string) ([]PoolEntry, error) {
         SELECT id, start_ip_int, end_ip_int, cidr, name, comment, status
         FROM pools
         WHERE name = ?
-        ORDER BY status, cidr
+        ORDER BY status, start_ip_int
     `, poolName)
 	if err != nil {
 		return nil, err
