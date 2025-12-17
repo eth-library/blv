@@ -1,6 +1,7 @@
 package helpers
 
 import (
+	"fmt"
 	"net"
 	"regexp"
 )
@@ -37,6 +38,15 @@ func IPToUint32(ip net.IP) uint32 {
 		return 0
 	}
 	return uint32(ip[0])<<24 | uint32(ip[1])<<16 | uint32(ip[2])<<8 | uint32(ip[3])
+}
+
+func Uint32ToIP(ip uint32) string {
+	return fmt.Sprintf("%d.%d.%d.%d",
+		(ip>>24)&0xFF,
+		(ip>>16)&0xFF,
+		(ip>>8)&0xFF,
+		ip&0xFF,
+	)
 }
 
 func GetIPRange(cidr string) (uint32, uint32, error) {

@@ -22,6 +22,7 @@ type PoolEntry struct {
 	Name       string
 	Comment    string
 	Status     string
+	CheckedIP  string
 }
 
 func Open(path string) (*sql.DB, error) {
@@ -137,29 +138,25 @@ func FindPoolByIP(dbConn *sql.DB, ipUint uint32) (*PoolEntry, error) {
 	return p, nil
 }
 
-// func FindPoolByIP(dbConn *sql.DB, ipUint uint32) ([]PoolEntry, error) {
-// 	app.LogIt.Debug(fmt.Sprintf("trying to find %v", ipUint))
-// 	rows, err := dbConn.Query(`
-// 	       SELECT id, start_ip_int, end_ip_int, cidr, name, comment, status
-// 	       FROM pools
-// 	       WHERE ? BETWEEN start_ip_int AND end_ip_int
-// 	       ORDER BY end_ip_int - start_ip_int ASC
-// 	   `, ipUint)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	defer rows.Close()
-// 	var res []PoolEntry
-// 	for rows.Next() {
-// 		var p PoolEntry
-// 		if err := rows.Scan(&p.ID, &p.StartIPInt, &p.EndIPInt, &p.CIDR, &p.Name, &p.Comment, &p.Status); err != nil {
-// 			return nil, err
-// 		}
-// 		res = append(res, p)
-// 	}
-// 	app.LogIt.Debug(fmt.Sprintf("found %d entries", len(res)))
-// 	return res, rows.Err()
-// }
+func FindBlacklistByIP(dbConn *sql.DB, ipUint uint32) (*PoolEntry, error) {
+	row := dbConn.QueryRow(`
+        SELECT id, start_ip_int, end_ip_int, cidr, name, comment, status
+        FROM pools
+        WHERE status = "b"
+        AND ? BETWEEN start_ip_int AND end_ip_int
+        ORDER BY end_ip_int - start_ip_int ASC
+        LIMIT 1
+    `, ipUint)
+
+	p := &PoolEntry{}
+	if err := row.Scan(&p.ID, &p.StartIPInt, &p.EndIPInt, &p.CIDR, &p.Name, &p.Comment, &p.Status); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return p, nil
+}
 
 func ListByPool(dbConn *sql.DB, poolName string) ([]PoolEntry, error) {
 	rows, err := dbConn.Query(`
@@ -219,9 +216,27 @@ func DeleteByID(dbConn *sql.DB, entryID string) error {
 }
 
 // Einen Pool whitelisten
-func WhitelistPool(dbConn *sql.DB, poolName string) error {
-	_, err := dbConn.Exec(`UPDATE pools SET status = "w" WHERE name = ?`, poolName)
-	return err
+func WhitelistPool(dbConn *sql.DB, poolName string) ([]PoolEntry, error) {
+	var foundEntries []PoolEntry
+	entries, err := ListByPool(dbConn, poolName)
+	if err != nil {
+		app.LogIt.Error(fmt.Sprintf("beim Whitelisten von Pool %s wurden keine Einträge gefunden: %v", poolName, err))
+	}
+	for _, entry := range entries {
+		for ipaddrInt := entry.StartIPInt; ipaddrInt <= entry.EndIPInt; ipaddrInt++ {
+			if foundEntry, _ := FindBlacklistByIP(dbConn, ipaddrInt); foundEntry != nil {
+				if foundEntry.Name != poolName {
+					foundEntry.CheckedIP = helpers.Uint32ToIP(ipaddrInt)
+					foundEntries = append(foundEntries, *foundEntry)
+				}
+			}
+		}
+	}
+	if foundEntries != nil {
+		return foundEntries, nil
+	}
+	_, err = dbConn.Exec(`UPDATE pools SET status = "w" WHERE name = ?`, poolName)
+	return nil, err
 }
 
 // Einen Pool blocken

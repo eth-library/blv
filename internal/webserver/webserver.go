@@ -172,7 +172,19 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	// Pool whitelisten
 	r.POST("/pools/:name/whitelist", func(c *gin.Context) {
 		poolName := c.Param("name")
-		_ = db.WhitelistPool(database, poolName)
+		foundEntries, err := db.WhitelistPool(database, poolName)
+		if err != nil {
+			c.Redirect(http.StatusInternalServerError, BasePath+"/pools/"+poolName+"?error=Fehler beim whitelisten")
+		}
+		if foundEntries != nil {
+			c.HTML(http.StatusOK, "found.html", gin.H{
+				"title":    "Pool " + poolName,
+				"error":    fmt.Sprintf("%v Einträge sind geblockt - bitte erst lösen", len(foundEntries)),
+				"entries":  foundEntries,
+				"poolName": poolName,
+			})
+			return
+		}
 		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
 	})
 

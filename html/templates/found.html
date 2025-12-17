@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>{{ .title }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="{{$.BasePath}}/static/styles.css">
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>{{ .title }}</h1>
+    </div>
+  </header>
+      <ul class="menu container">
+        <li><a href="{{ $.BasePath }}/" class="link-back">Zurück zur Startseite</a></li>
+        <li><a href="{{$.BasePath}}/pools/{{.poolName}}" class="link-back">Zurück zum Pool {{ .poolName }}</a></li>
+        <li><a href="{{$.BasePath}}/pools" class="link-back">Zur Poolübersicht</a></li>
+      </ul>
+
+  <main>
+    <div class="container">
+      <section class="status">
+        {{ if .error }}
+        <div class="alert alert-error">{{ .error }}</div>
+        {{ end }}
+
+        {{ if .message }}
+        <div class="alert alert-success">{{ .message }}</div>
+        {{ end }}
+
+        {{ if .result }}
+            <p>{{ .result }}</p>
+        {{ end }}
+      </section>
+
+        <section class="card">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">IP</th>
+                <th scope="col">Pool</th>
+                <th scope="col">CIDR</th>
+                <th scope="col">Kommentar</th>
+              </tr>
+            </thead>
+            <tbody>
+            {{ range .entries }}
+              <tr>
+                <td>{{ .CheckedIP }}</td>
+                <td><a href="{{$.BasePath}}/pools/{{ .Name }}">{{ .Name }}</a></td>
+                <td>{{ .CIDR }}</td>
+                <td>{{ .Comment }}</td>
+              </tr>
+            {{ end }}
+          </tbody>
+          </table>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
