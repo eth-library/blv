@@ -88,6 +88,22 @@ func InsertEntry(dbConn *sql.DB, cidrString, name, comment, status string) (*Poo
 	return nil, err
 }
 
+func InsertPoollistEntry(dbConn *sql.DB, cidrString, name, comment, status string) error {
+	if len(comment) > 60 {
+		comment = comment[:60]
+	}
+	startIP, endIP, err := helpers.GetIPRange(cidrString)
+	if err != nil {
+		return fmt.Errorf("ungültiger CIDR %s: %w", cidrString, err)
+	}
+	_, err = dbConn.Exec(
+		"INSERT INTO pools(start_ip_int, end_ip_int, cidr, name, comment, status) VALUES(?, ?, ?, ?, ?, ?)",
+		startIP, endIP, cidrString, name, comment, status,
+	)
+
+	return err
+}
+
 func InsertLutItem(dbConn *sql.DB, ip_addr string, name string) error {
 	ipNet := net.ParseIP(ip_addr)
 	ip_int := helpers.IPToUint32(ipNet)

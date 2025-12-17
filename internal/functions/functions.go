@@ -16,7 +16,7 @@ import (
 	"github.com/SvenKethz/blv/internal/helpers"
 )
 
-func ImportConf(database *sql.DB, r io.Reader, poolName string, status string) (*db.PoolEntry, error) {
+func ImportConf(database *sql.DB, r io.Reader, poolName string, status string) error {
 	scanner := bufio.NewScanner(r)
 
 	for scanner.Scan() {
@@ -44,24 +44,16 @@ func ImportConf(database *sql.DB, r io.Reader, poolName string, status string) (
 				cidr = part
 			}
 		}
-		// TODO: Hier die Prüfung, ob CIDR schon existiert... (existingentries)
-		// Was ist dann zu tun? Existierenden Status übernehmen?
-		// Wie prüfe ich Dopplungen und löse sie auf? (ggfs welche, die sich sogar widersprechen)
-		// --> existierende CIDR in einer Seite auflisten mit Lösungsmöglichkeiten
-		// Möglichkeit zum DB-Dopplungs-Check (also auch für existierende Einträge) bauen?
-		existingEntry, err := db.InsertEntry(database, cidr, poolName, comment, status)
+		err := db.InsertPoollistEntry(database, cidr, poolName, comment, status)
 		if err != nil {
-			return nil, fmt.Errorf("Fehler beim Import von %s: %w", cidr, err)
-		}
-		if existingEntry != nil {
-			return existingEntry, nil
+			return fmt.Errorf("Fehler beim Import von %s: %w", cidr, err)
 		}
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return err
 	}
-	return nil, nil
+	return nil
 }
 
 func GetStatusCount(entries []db.PoolEntry) (wCount int, bCount int) {
