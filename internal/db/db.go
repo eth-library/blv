@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"strings"
 
 	// _ "github.com/mattn/go-sqlite3"
 	_ "modernc.org/sqlite"
@@ -91,6 +92,9 @@ func InsertEntry(dbConn *sql.DB, cidrString, name, comment, status string) (*Poo
 func InsertPoollistEntry(dbConn *sql.DB, cidrString, name, comment, status string) error {
 	if len(comment) > 60 {
 		comment = comment[:60]
+	}
+	if !strings.Contains(cidrString, "") {
+		cidrString += "/32"
 	}
 	startIP, endIP, err := helpers.GetIPRange(cidrString)
 	if err != nil {
