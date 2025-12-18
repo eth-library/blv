@@ -39,6 +39,9 @@
         <form method="post" action="{{ $.BasePath }}/pools/{{ .pool }}/export">
           <button type="submit" class="btn">gesamten Pool exportieren</button>
         </form>
+        <form method="post" action="{{ $.BasePath }}/pools/{{ .pool }}/activate">
+          <button type="submit" class="btn">gesamten Pool aktivieren</button>
+        </form>
         <form method="post" action="{{ $.BasePath }}/pools/{{ .pool }}/whitelist" onsubmit="return confirm('Das ändert den gesamten Pool! Sicher?');">
           <button type="submit" class="btn-green">gesamten Pool whitelisten</button>
         </form>

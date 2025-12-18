@@ -188,6 +188,27 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			"BasePath": BasePath,
 		})
 	})
+	// Pool aktivieren
+	r.POST("/pools/:name/activate", func(c *gin.Context) {
+		poolName := c.Param("name")
+		wCount, bCount, err := functions.ExportConf(database, poolName, app.Config.OutputPath)
+		count := wCount + bCount
+		if err != nil {
+			c.HTML(http.StatusSeeOther, "pool_detail.html", gin.H{
+				"title":    "Pool " + poolName,
+				"error":    fmt.Sprintf("Fehler beim Export des Pools: %v", err),
+				"BasePath": BasePath,
+			})
+			return
+		}
+		entries, err := db.ListByPool(database, poolName)
+		c.HTML(http.StatusOK, "pool_detail.html", gin.H{
+			"title":    "Pool " + poolName,
+			"message":  fmt.Sprintf("%v items exportiert", count),
+			"entries":  entries,
+			"BasePath": BasePath,
+		})
+	})
 
 	// Pool whitelisten
 	r.POST("/pools/:name/whitelist", func(c *gin.Context) {
