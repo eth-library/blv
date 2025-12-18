@@ -223,7 +223,7 @@ func LoadApacheLists(database *sql.DB) error {
 	if err != nil {
 		app.LogIt.Error(fmt.Sprintf("Fehler beim Lesen der ApacheBlocklisten: %v", err))
 	}
-	err = LoadConfigs(database, entries, app.Config.ListPath+"blocklists/")
+	err = LoadConfigs(database, entries, app.Config.ListPath+"blocklists/", "b")
 	if err != nil {
 		app.LogIt.Error(fmt.Sprintf("Fehler beim Lesen der ApacheBlocklisten: %v", err))
 	}
@@ -232,14 +232,14 @@ func LoadApacheLists(database *sql.DB) error {
 	if err != nil {
 		app.LogIt.Error(fmt.Sprintf("Fehler beim Lesen der ApacheWhitelisten: %v", err))
 	}
-	err = LoadConfigs(database, entries, app.Config.ListPath+"whitelists/")
+	err = LoadConfigs(database, entries, app.Config.ListPath+"whitelists/", "w")
 	if err != nil {
 		app.LogIt.Error(fmt.Sprintf("Fehler beim Lesen der ApacheWhitelisten: %v", err))
 	}
 	return err
 }
 
-func LoadConfigs(database *sql.DB, entries []os.DirEntry, filesPath string) error {
+func LoadConfigs(database *sql.DB, entries []os.DirEntry, filesPath, status string) error {
 	for _, conf := range entries {
 		if filepath.Ext(conf.Name()) == ".conf" {
 			app.LogIt.Debug("found " + conf.Name() + " in " + filesPath)
@@ -251,7 +251,7 @@ func LoadConfigs(database *sql.DB, entries []os.DirEntry, filesPath string) erro
 				app.LogIt.Info("lade " + conf.Name())
 				fmt.Println("lade", conf.Name())
 				poolName := strings.TrimSuffix(conf.Name(), filepath.Ext(conf.Name()))
-				ImportConf(database, file, poolName, "w")
+				ImportConf(database, file, poolName, status)
 			}
 		}
 	}
