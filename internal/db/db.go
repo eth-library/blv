@@ -238,12 +238,18 @@ func WhitelistPool(dbConn *sql.DB, poolName string) ([]PoolEntry, error) {
 		return foundEntries, nil
 	}
 	_, err = dbConn.Exec(`UPDATE pools SET status = "w" WHERE name = ?`, poolName)
+	if err != nil {
+		app.LogIt.Error(fmt.Sprintf("Fehler beim Update des pools %s: %v", poolName, err))
+		return nil, err
+	}
+	// TODO: hier noch eine eventuell existierende blocklist.conf sichern und löschen
 	return nil, err
 }
 
 // Einen Pool blocken
 func BlockPool(dbConn *sql.DB, poolName string) error {
 	_, err := dbConn.Exec(`UPDATE pools SET status = "b" WHERE name = ?`, poolName)
+	// TODO: hier noch eine eventuell existierende whitelist.conf sichern und löschen
 	return err
 }
 
