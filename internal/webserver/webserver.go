@@ -107,6 +107,24 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			"BasePath": BasePath,
 		})
 	})
+	// Adminseite
+	r.GET("/admin", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "admin.html", gin.H{
+			"title":    "Administration",
+			"BasePath": BasePath,
+		})
+	})
+	r.POST("/activate", func(c *gin.Context) {
+		err := functions.ExportDB2Conf(database)
+		names, err := db.ListPoolNames(database)
+		c.HTML(http.StatusOK, "pools.html", gin.H{
+			"title":    "IP Blocklist Manager",
+			"message":  fmt.Sprintf("%v Pools importiert", len(names)),
+			"pools":    names,
+			"error":    err,
+			"BasePath": BasePath,
+		})
+	})
 
 	// Übersicht aller Pools
 	r.GET("/pools", func(c *gin.Context) {
@@ -152,7 +170,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	// Pool exportieren
 	r.POST("/pools/:name/export", func(c *gin.Context) {
 		poolName := c.Param("name")
-		wCount, bCount, err := functions.ExportConf(database, poolName)
+		wCount, bCount, err := functions.ExportConf(database, poolName, app.Config.OutputPath)
 		count := wCount + bCount
 		if err != nil {
 			c.HTML(http.StatusSeeOther, "pool_detail.html", gin.H{
@@ -162,9 +180,11 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			})
 			return
 		}
+		entries, err := db.ListByPool(database, poolName)
 		c.HTML(http.StatusOK, "pool_detail.html", gin.H{
 			"title":    "Pool " + poolName,
 			"message":  fmt.Sprintf("%v items exportiert", count),
+			"entries":  entries,
 			"BasePath": BasePath,
 		})
 	})

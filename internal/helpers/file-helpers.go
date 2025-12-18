@@ -67,6 +67,40 @@ func SeparateFileFromPath(fullpath string) (path string, filename string) {
 	return path, filename
 }
 
+func BackupFiles(sourcePath, fileExtension, backupPath string) error {
+	filesBackuped := 0
+	if err := os.MkdirAll(backupPath, 0o750); err != nil && !os.IsExist(err) {
+		fmt.Println(err)
+		return err
+	}
+
+	entries, err := os.ReadDir(sourcePath)
+	if err != nil {
+		fmt.Printf("Fehler beim Lesen der Dateien zum Backup: %v", err)
+		return err
+	}
+
+	for _, file2backup := range entries {
+		if filepath.Ext(file2backup.Name()) == fileExtension {
+			// file kopieren
+			srcPath := filepath.Join(sourcePath, file2backup.Name())
+			dstPath := filepath.Join(backupPath, file2backup.Name())
+
+			data, err := os.ReadFile(srcPath)
+			if err != nil {
+				return err
+			}
+			// Rechte ggf. aus Stat übernehmen
+			if err := os.WriteFile(dstPath, data, 0o644); err != nil {
+				return err
+			}
+			filesBackuped++
+		}
+	}
+	fmt.Println(filesBackuped, "Dateien von", sourcePath, "nach", backupPath, "gesichert")
+	return nil
+}
+
 func CheckSum(hashAlgorithm hash.Hash, filename string) (string, error) {
 	file, err := os.Open(filename)
 	if err != nil {

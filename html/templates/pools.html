@@ -14,6 +14,7 @@
   </header>
       <ul class="menu container">
         <li><a href="{{ $.BasePath }}/" class="link-back">Zurück zur Startseite</a></li>
+        <li><a href="{{$.BasePath}}/admin" class="link-back">Zur Administration</a></li>
       </ul>
 
   <main>
@@ -50,28 +51,6 @@
                 <li>Keine Einträge vorhanden.</li>
             {{ end }}
         </ul>
-      </section>
-        <section class="card">
-          <h2>Blockliste hochladen</h2>
-          <p class="hint">Unterstützte Formate: 
-            <ul>
-              <li>Apache Konfigurationsdatei mit require [not] IP-Einträgen (.conf)</li>
-              <li>einfache IP-Listen (.txt)</li>
-            </ul>
-          </p>
-          <form method="post" action="{{ $.BasePath }}/pools/upload" enctype="multipart/form-data">
-            <div class="field-group">
-              <label for="file">Datei auswählen</label>
-              <input type="file" id="file" name="file" accept=".conf, .txt">
-            </div>
-            <button type="submit">Hochladen</button>
-          </form>
-      </section>
-        <section class="card">
-          <h2>reset DB</h2>
-          <form method="post" action="{{ $.BasePath }}/reset" onsubmit="return confirm('Das leert die gesamte Datenbank und lädt die Apache-Blocklisten neu ein! Sicher?');">
-            <button type="submit">RESET</button>
-          </form>
       </section>
 </div>
 

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	app "github.com/SvenKethz/blv/internal/configuration"
 	"github.com/SvenKethz/blv/internal/db"
@@ -67,15 +68,14 @@ func GetStatusCount(entries []db.PoolEntry) (wCount int, bCount int) {
 	return wCount, bCount
 }
 
-func ExportConf(database *sql.DB, poolName string) (wExported int, bExported int, err error) {
+func ExportConf(database *sql.DB, poolName, outputPath string) (wExported int, bExported int, err error) {
 	entries, _ := db.ListByPool(database, poolName)
 	wCount, bCount := GetStatusCount(entries)
 	wExported = 0
 	bExported = 0
 
 	if wCount > 0 {
-		// Datei anlegen/überschreiben
-		whitelistFile, err := os.Create(app.Config.OutputPath + "whitelists/" + poolName + ".conf")
+		whitelistFile, err := os.Create(outputPath + "whitelists/" + poolName + ".conf")
 		if err != nil {
 			return 0, 0, fmt.Errorf("konnte Datei nicht erstellen: %w", err)
 		}
@@ -106,8 +106,7 @@ func ExportConf(database *sql.DB, poolName string) (wExported int, bExported int
 		}
 	}
 	if bCount > 0 {
-		// Datei anlegen/überschreiben
-		blocklistFile, err := os.Create(app.Config.OutputPath + "blocklists/" + poolName + ".conf")
+		blocklistFile, err := os.Create(outputPath + "blocklists/" + poolName + ".conf")
 		if err != nil {
 			return 0, 0, fmt.Errorf("konnte Datei nicht erstellen: %w", err)
 		}
@@ -149,15 +148,47 @@ func InitDB(database *sql.DB) error {
 	return err
 }
 
+func ExportDB2Conf(database *sql.DB) error {
+	today := time.Now().Format("2006-01-02")
+
+	// aktuelle WhiteListen sichern:
+	err := helpers.BackupFiles(app.Config.ListPath+"whitelists/", ".conf", app.Config.ListPath+"whitelists/"+today)
+	if err != nil {
+		app.LogIt.Error("Keine Dateien Exportiert, weil kein Backup erstellt werden konnte")
+		return err
+	}
+	// aktuelle BlockListen sichern:
+	err = helpers.BackupFiles(app.Config.ListPath+"blocklists/", ".conf", app.Config.ListPath+"blocklists/"+today)
+	if err != nil {
+		app.LogIt.Error("Keine Dateien Exportiert, weil kein Backup erstellt werden konnte")
+		return err
+	}
+	err = ExportDB(database, app.Config.ListPath)
+	if err != nil {
+		app.LogIt.Error(fmt.Sprintf("Fehler beim Export der Datenbank: %v", err))
+		return err
+	}
+	fmt.Println("Konfigurationen aus der DB in die listen geschrieben.")
+	app.LogIt.Info("Konfigurationen aus der DB in die listen geschrieben.")
+	fmt.Println("der Webserver muss neu geladen werden (systemctl reload apache2)")
+	return nil
+}
+
 func ResetDB(database *sql.DB) error {
-	ExportDB(database)
-	err := db.CleanDB(database)
+	err := ExportDB(database, app.Config.BackupPath)
 	if err != nil {
 		app.LogIt.Error(fmt.Sprintf("Fehler beim Putzen der Datenbank: %v", err))
+		return err
+	}
+	err = db.CleanDB(database)
+	if err != nil {
+		app.LogIt.Error(fmt.Sprintf("Fehler beim Putzen der Datenbank: %v", err))
+		return err
 	}
 	err = db.CreateTables(database)
 	if err != nil {
 		app.LogIt.Error(fmt.Sprintf("Fehler beim Anlegen der Datenbank: %v", err))
+		return err
 	}
 	err = LoadApacheLists(database)
 	if err != nil {
@@ -166,68 +197,65 @@ func ResetDB(database *sql.DB) error {
 	return err
 }
 
-func ExportDB(database *sql.DB) {
+func ExportDB(database *sql.DB, outputPath string) error {
 	pools, err := db.ListPoolNames(database)
 	if err != nil {
 		app.LogIt.Error(fmt.Sprintf("Fehler beim Lesen der Pools: %v", err))
+		return err
 	}
 	for _, pool := range pools {
-		outputFilePath := app.Config.OutputPath + pool + ".conf"
-		wCount, bCount, err := ExportConf(database, pool)
+		wCount, bCount, err := ExportConf(database, pool, outputPath)
 		count := wCount + bCount
 		if err != nil {
 			app.LogIt.Error(fmt.Sprintf("Fehler beim Export des Pools %s: %v", pool, err))
+			return err
 		} else {
-			app.LogIt.Info(fmt.Sprintf("%d", count) + " items from " + pool + " exported to " + outputFilePath)
+			app.LogIt.Info(fmt.Sprintf("%d", count) + " items from " + pool + " exported to " + outputPath)
 		}
 	}
+	return nil
 }
 
 func LoadApacheLists(database *sql.DB) error {
 	app.LogIt.Debug("LoadApacheLists")
 
-	entries, err := os.ReadDir(app.Config.BlocklistPath)
+	entries, err := os.ReadDir(app.Config.ListPath + "blocklists/")
+	if err != nil {
+		app.LogIt.Error(fmt.Sprintf("Fehler beim Lesen der ApacheBlocklisten: %v", err))
+	}
+	err = LoadConfigs(database, entries, app.Config.ListPath+"blocklists/")
 	if err != nil {
 		app.LogIt.Error(fmt.Sprintf("Fehler beim Lesen der ApacheBlocklisten: %v", err))
 	}
 
-	for _, conf := range entries {
-		if filepath.Ext(conf.Name()) == ".conf" {
-			app.LogIt.Debug("found " + conf.Name() + " in " + app.Config.BlocklistPath)
-			file, err := os.Open(app.Config.BlocklistPath + conf.Name())
-			if err != nil {
-				app.LogIt.Error(fmt.Sprintf("Fehler beim Öffnen von %s: %v", conf.Name(), err))
-			} else {
-				app.LogIt.Info("lade " + conf.Name())
-				fmt.Println("lade", conf.Name())
-				poolName := strings.TrimSuffix(conf.Name(), filepath.Ext(conf.Name()))
-				ImportConf(database, file, poolName, "b")
-			}
-
-		}
-	}
-	entries, err = os.ReadDir(app.Config.WhitelistPath)
+	entries, err = os.ReadDir(app.Config.ListPath + "whitelists/")
 	if err != nil {
 		app.LogIt.Error(fmt.Sprintf("Fehler beim Lesen der ApacheWhitelisten: %v", err))
 	}
+	err = LoadConfigs(database, entries, app.Config.ListPath+"whitelists/")
+	if err != nil {
+		app.LogIt.Error(fmt.Sprintf("Fehler beim Lesen der ApacheWhitelisten: %v", err))
+	}
+	return err
+}
 
+func LoadConfigs(database *sql.DB, entries []os.DirEntry, filesPath string) error {
 	for _, conf := range entries {
 		if filepath.Ext(conf.Name()) == ".conf" {
-			app.LogIt.Debug("found " + conf.Name() + " in " + app.Config.WhitelistPath)
-			file, err := os.Open(app.Config.WhitelistPath + conf.Name())
+			app.LogIt.Debug("found " + conf.Name() + " in " + filesPath)
+			file, err := os.Open(filesPath + conf.Name())
 			if err != nil {
 				app.LogIt.Error(fmt.Sprintf("Fehler beim Öffnen von %s: %v", conf.Name(), err))
+				return err
 			} else {
 				app.LogIt.Info("lade " + conf.Name())
 				fmt.Println("lade", conf.Name())
 				poolName := strings.TrimSuffix(conf.Name(), filepath.Ext(conf.Name()))
 				ImportConf(database, file, poolName, "w")
 			}
-
 		}
 	}
-
-	return err
+	return nil
 }
 
 func LoadLuts(database *sql.DB, folder string) error {

@@ -23,9 +23,9 @@ var (
 
 type ApplicationConfig struct {
 	DbPath         string    `yaml:"dbPath"`
-	BlocklistPath  string    `yaml:"blocklistPath"`
-	WhitelistPath  string    `yaml:"whitelistPath"`
+	ListPath       string    `yaml:"listPath"`
 	OutputPath     string    `yaml:"outputPath"`
+	BackupPath     string    `yaml:"backupPath"`
 	WebfilesPath   string    `yaml:"webfilesPath"`
 	BasePath       string    `yaml:"basePath"`
 	WebPort        int       `yaml:"webPort"`
@@ -63,8 +63,8 @@ func (Config *ApplicationConfig) Initialize(ConfigPath *string) {
 func (config *ApplicationConfig) setDefaults() {
 	*config = ApplicationConfig{
 		DbPath:         "./blv.db",
-		BlocklistPath:  "./blocklists/",
-		WhitelistPath:  "./whitelists/",
+		ListPath:       "./",
+		BackupPath:     "./backup/",
 		OutputPath:     "./output/",
 		WebfilesPath:   "./html/",
 		BasePath:       "",
@@ -80,6 +80,9 @@ func (config *ApplicationConfig) setDefaults() {
 func (c *ApplicationConfig) CheckConfig() {
 	// TODO: hier könnte noch ein DateLayoutCheck rein
 	helpers.Checknaddtrailingslash(&c.Logcfg.LogFolder)
+	helpers.Checknaddtrailingslash(&c.BackupPath)
+	helpers.Checknaddtrailingslash(&c.OutputPath)
+	helpers.Checknaddtrailingslash(&c.ListPath)
 	// check if the log folder exists
 	if !helpers.CheckIfDir(c.Logcfg.LogFolder) {
 		helpers.ToBeCreated(c.Logcfg.LogFolder)

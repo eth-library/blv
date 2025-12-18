@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>{{ .title }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="{{ $.BasePath }}/static/styles.css">
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>{{ .title }}</h1>
+    </div>
+  </header>
+      <ul class="menu container">
+        <li><a href="{{ $.BasePath }}/" class="link-back">Zurück zur Startseite</a></li>
+      </ul>
+
+  <main>
+    <div class="container">
+
+      <section class="status">
+        {{ if .error }}
+        <div class="alert alert-error">{{ .error }}
+          {{ if .poolName }}
+              <p>Pool: <a href="{{$.BasePath}}/pools/{{ .poolName }}">{{ .poolName }}</a></p>
+              <p>Kommentar: {{ .comment }}</p>
+            {{ end }}
+        </div>
+        {{ end }}
+
+        {{ if .message }}
+          <div class="alert alert-info">
+            <p>{{ .message }}</p>
+            {{ if .poolName }}
+              <p>Pool: <a href="{{ $.BasePath }}/pools/{{ .poolName }}">{{ .poolName }}</a></p>
+              <p>Kommentar: {{ .comment }}</p>
+            {{ end }}
+          </div>
+        {{ end }}
+      </section>
+
+        <section class="card">
+          <h2>Blockliste hochladen</h2>
+          <p class="hint">Unterstützte Formate: 
+            <ul>
+              <li>Apache Konfigurationsdatei mit require [not] IP-Einträgen (.conf)</li>
+              <li>einfache IP-Listen (.txt)</li>
+            </ul>
+          </p>
+          <form method="post" action="{{ $.BasePath }}/pools/upload" enctype="multipart/form-data">
+            <div class="field-group">
+              <label for="file">Datei auswählen</label>
+              <input type="file" id="file" name="file" accept=".conf, .txt">
+            </div>
+            <button type="submit">Hochladen</button>
+          </form>
+      </section>
+        <section class="card">
+          <h2>DB in Configs exportieren (produktiv!)</h2>
+          <form method="post" action="{{ $.BasePath }}/activate" onsubmit="return confirm('Das exportiert / überschreibt aktuelle conf-Listen! Der Webserver muss anschliessend re-loaded werden. Sicher?');">
+            <button type="submit">aktivieren</button>
+          </form>
+      </section>
+        <section class="card">
+          <h2>reset DB</h2>
+          <form method="post" action="{{ $.BasePath }}/reset" onsubmit="return confirm('Das leert die gesamte Datenbank und lädt die Apache-Blocklisten neu ein! Sicher?');">
+            <button type="submit">RESET</button>
+          </form>
+      </section>
+</div>
+
+    </div>
+  </main>
+</body>
+</html>
+
+
