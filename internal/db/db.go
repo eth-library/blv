@@ -217,12 +217,14 @@ func DeleteByID(dbConn *sql.DB, entryID string) error {
 
 // Einen Pool whitelisten
 func WhitelistPool(dbConn *sql.DB, poolName string) ([]PoolEntry, error) {
+	app.LogIt.Debug("whitelisting pool " + poolName)
 	var foundEntries []PoolEntry
 	entries, err := ListByPool(dbConn, poolName)
 	if err != nil {
 		app.LogIt.Error(fmt.Sprintf("beim Whitelisten von Pool %s wurden keine Einträge gefunden: %v", poolName, err))
 	}
 	for _, entry := range entries {
+		app.LogIt.Debug("checking" + entry.CIDR + " for existing blockings")
 		for ipaddrInt := entry.StartIPInt; ipaddrInt <= entry.EndIPInt; ipaddrInt++ {
 			if foundEntry, _ := FindBlacklistByIP(dbConn, ipaddrInt); foundEntry != nil {
 				if foundEntry.Name != poolName {
