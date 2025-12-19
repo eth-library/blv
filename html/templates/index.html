@@ -32,7 +32,7 @@
         {{ end }}
             <p>{{ .message }}</p>
             {{ if .poolName }}
-              <p>Pool: <a href="{{$.BasePath}}/pools/{{ .poolName }}">{{ .poolName }}</a></p>
+              <p>Pool: <a href="{{$.BasePath}}/admin/pools/{{ .poolName }}">{{ .poolName }}</a></p>
               <p>Kommentar: {{ .comment }}</p>
             {{ end }}
           </div>

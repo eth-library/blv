@@ -13,8 +13,8 @@
     </div>
   </header>
       <ul class="menu container">
-        <li><a href="{{ $.BasePath }}/pools" class="link-back">Zurück zur Poolübersicht</a></li>
         <li><a href="{{ $.BasePath }}/" class="link-back">Zurück zur Startseite</a></li>
+        <li><a href="{{ $.BasePath }}/pools" class="link-back">Zurück zur Poolübersicht</a></li>
       </ul>
 
   <main>
@@ -25,7 +25,7 @@
         <div class="alert alert-error">
           <p>{{ .error }}</p>
           {{ if .poolName }}
-              <p>Pool: <a href="{{$.BasePath}}/pools/{{ .poolName }}">{{ .poolName }}</a></p>
+              <p>Pool: <a href="{{$.BasePath}}/admin/pools/{{ .poolName }}">{{ .poolName }}</a></p>
               <p>Kommentar: {{ .comment }}</p>
             {{ end }}
         </div>
@@ -36,19 +36,19 @@
       {{ end }}
 
       <section class="card menu">
-        <form method="post" action="{{ $.BasePath }}/pools/{{ .pool }}/export">
+        <form method="post" action="{{ $.BasePath }}/admin/pools/{{ .pool }}/export">
           <button type="submit" class="btn">gesamten Pool exportieren</button>
         </form>
-        <form method="post" action="{{ $.BasePath }}/pools/{{ .pool }}/activate">
+        <form method="post" action="{{ $.BasePath }}/admin/pools/{{ .pool }}/activate">
           <button type="submit" class="btn">gesamten Pool aktivieren</button>
         </form>
-        <form method="post" action="{{ $.BasePath }}/pools/{{ .pool }}/whitelist" onsubmit="return confirm('Das ändert den gesamten Pool! Sicher?');">
+        <form method="post" action="{{ $.BasePath }}/admin/pools/{{ .pool }}/whitelist" onsubmit="return confirm('Das ändert den gesamten Pool! Sicher?');">
           <button type="submit" class="btn-green">gesamten Pool whitelisten</button>
         </form>
-        <form method="post" action="{{ $.BasePath }}/pools/{{ .pool }}/block" onsubmit="return confirm('Das ändert den gesamten Pool! Sicher?');">
+        <form method="post" action="{{ $.BasePath }}/admin/pools/{{ .pool }}/block" onsubmit="return confirm('Das ändert den gesamten Pool! Sicher?');">
           <button type="submit" class="btn-grey">gesamten Pool blocken</button>
         </form>
-        <form method="post" action="{{ $.BasePath }}/pools/{{ .pool }}/delete" onsubmit="return confirm('Das löscht den gesamten Pool! Sicher?');">
+        <form method="post" action="{{ $.BasePath }}/admin/pools/{{ .pool }}/delete" onsubmit="return confirm('Das löscht den gesamten Pool! Sicher?');">
           <button type="submit" class="btn-danger">gesamten Pool Löschen</button>
         </form>
       </section>
@@ -71,32 +71,32 @@
                 <td>{{ .Comment }}</td>
                 {{ if eq .Status  "b" }}
                 <td>
-                  <form method="post" action="{{ $.BasePath }}/pools/{{ $.pool }}/whitelistIP">
+                  <form method="post" action="{{ $.BasePath }}/admin/pools/{{ $.pool }}/whitelistIP">
                     <input type="hidden" name="entryID" value="{{ .ID }}">
                     <button type="submit" class="btn-green">whitelisten</button>
                   </form>
                 </td>
                 {{ else if eq .Status "w" }}
                 <td>
-                  <form method="post" action="{{ $.BasePath }}/pools/{{ $.pool }}/blockIP">
+                  <form method="post" action="{{ $.BasePath }}/admin/pools/{{ $.pool }}/blockIP">
                     <input type="hidden" name="entryID" value="{{ .ID }}">
                     <button type="submit" class="btn-grey">blocken</button>
                   </form>
                 </td>
                 {{ else }}
                 <td>
-                  <form method="post" action="{{ $.BasePath }}/pools/{{ $.pool }}/whitelistIP">
+                  <form method="post" action="{{ $.BasePath }}/admin/pools/{{ $.pool }}/whitelistIP">
                     <input type="hidden" name="entryID" value="{{ .ID }}">
                     <button type="submit" class="btn-green">whitelisten</button>
                   </form>
-                  <form method="post" action="{{ $.BasePath }}/pools/{{ $.pool }}/blockIP">
+                  <form method="post" action="{{ $.BasePath }}/admin/pools/{{ $.pool }}/blockIP">
                     <input type="hidden" name="entryID" value="{{ .ID }}">
                     <button type="submit" class="btn-grey">blocken</button>
                   </form>
                 </td>
                 {{ end }}
                 <td>
-                  <form method="post" action="{{ $.BasePath }}/pools/{{ $.pool }}/deleteIP">
+                  <form method="post" action="{{ $.BasePath }}/admin/pools/{{ $.pool }}/deleteIP">
                     <input type="hidden" name="entryID" value="{{ .ID }}">
                     <button type="submit" class="btn-danger">Löschen</button>
                   </form>
@@ -114,7 +114,7 @@
 
       <section class="card">
         <h3>Neuen CIDR hinzufügen</h3>
-        <form method="post" action="{{ $.BasePath }}/pools/{{ .pool }}/addIP" novalidate>
+        <form method="post" action="{{ $.BasePath }}/admin/pools/{{ .pool }}/addIP" novalidate>
           <div class="field-group">
             <label for="cidr">CIDR</label>
             <input type="text" id="cidr" name="cidr" placeholder="z. B. 192.168.1.0/24">

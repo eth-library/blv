@@ -24,7 +24,7 @@
         {{ if .error }}
         <div class="alert alert-error">{{ .error }}
           {{ if .poolName }}
-              <p>Pool: <a href="{{$.BasePath}}/pools/{{ .poolName }}">{{ .poolName }}</a></p>
+              <p>Pool: <a href="{{$.BasePath}}/admin/pools/{{ .poolName }}">{{ .poolName }}</a></p>
               <p>Kommentar: {{ .comment }}</p>
             {{ end }}
         </div>
@@ -34,7 +34,7 @@
           <div class="alert alert-info">
             <p>{{ .message }}</p>
             {{ if .poolName }}
-              <p>Pool: <a href="{{ $.BasePath }}/pools/{{ .poolName }}">{{ .poolName }}</a></p>
+              <p>Pool: <a href="{{ $.BasePath }}/admin/pools/{{ .poolName }}">{{ .poolName }}</a></p>
               <p>Kommentar: {{ .comment }}</p>
             {{ end }}
           </div>
@@ -46,7 +46,7 @@
 
         <ul class="data-list">
             {{ range .pools }}
-                <li><a href="{{ $.BasePath }}/pools/{{ . }}" class="link-item">{{ . }}</a></li>
+                <li><a href="{{ $.BasePath }}/admin/pools/{{ . }}" class="link-item">{{ . }}</a></li>
             {{ else }}
                 <li>Keine Einträge vorhanden.</li>
             {{ end }}

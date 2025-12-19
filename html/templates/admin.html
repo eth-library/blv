@@ -14,6 +14,7 @@
   </header>
       <ul class="menu container">
         <li><a href="{{ $.BasePath }}/" class="link-back">Zurück zur Startseite</a></li>
+        <li><a href="{{$.BasePath}}/pools" class="link-back">Zur Poolübersicht</a></li>
       </ul>
 
   <main>
@@ -23,7 +24,7 @@
         {{ if .error }}
         <div class="alert alert-error">{{ .error }}
           {{ if .poolName }}
-              <p>Pool: <a href="{{$.BasePath}}/pools/{{ .poolName }}">{{ .poolName }}</a></p>
+              <p>Pool: <a href="{{$.BasePath}}/admin/pools/{{ .poolName }}">{{ .poolName }}</a></p>
               <p>Kommentar: {{ .comment }}</p>
             {{ end }}
         </div>
@@ -33,7 +34,7 @@
           <div class="alert alert-info">
             <p>{{ .message }}</p>
             {{ if .poolName }}
-              <p>Pool: <a href="{{ $.BasePath }}/pools/{{ .poolName }}">{{ .poolName }}</a></p>
+              <p>Pool: <a href="{{ $.BasePath }}/admin/pools/{{ .poolName }}">{{ .poolName }}</a></p>
               <p>Kommentar: {{ .comment }}</p>
             {{ end }}
           </div>
@@ -48,7 +49,7 @@
               <li>einfache IP-Listen (.txt)</li>
             </ul>
           </p>
-          <form method="post" action="{{ $.BasePath }}/pools/upload" enctype="multipart/form-data">
+          <form method="post" action="{{ $.BasePath }}/admin/pools/upload" enctype="multipart/form-data">
             <div class="field-group">
               <label for="file">Datei auswählen</label>
               <input type="file" id="file" name="file" accept=".conf, .txt">
@@ -58,13 +59,13 @@
       </section>
         <section class="card">
           <h2>DB in Configs exportieren (produktiv!)</h2>
-          <form method="post" action="{{ $.BasePath }}/activate" onsubmit="return confirm('Das exportiert / überschreibt aktuelle conf-Listen! Der Webserver muss anschliessend re-loaded werden. Sicher?');">
+          <form method="post" action="{{ $.BasePath }}/admin/activate" onsubmit="return confirm('Das exportiert / überschreibt aktuelle conf-Listen! Der Webserver muss anschliessend re-loaded werden. Sicher?');">
             <button type="submit">aktivieren</button>
           </form>
       </section>
         <section class="card">
           <h2>reset DB</h2>
-          <form method="post" action="{{ $.BasePath }}/reset" onsubmit="return confirm('Das leert die gesamte Datenbank und lädt die Apache-Blocklisten neu ein! Sicher?');">
+          <form method="post" action="{{ $.BasePath }}/admin/reset" onsubmit="return confirm('Das leert die gesamte Datenbank und lädt die Apache-Blocklisten neu ein! Sicher?');">
             <button type="submit">RESET</button>
           </form>
       </section>

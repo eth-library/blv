@@ -95,37 +95,6 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			"BasePath": BasePath,
 		})
 	})
-
-	r.POST("/reset", func(c *gin.Context) {
-		err := functions.ResetDB(database)
-		names, err := db.ListPoolNames(database)
-		c.HTML(http.StatusOK, "pools.html", gin.H{
-			"title":    "IP Blocklist Manager",
-			"message":  fmt.Sprintf("%v Pools importiert", len(names)),
-			"pools":    names,
-			"error":    err,
-			"BasePath": BasePath,
-		})
-	})
-	// Adminseite
-	r.GET("/admin", func(c *gin.Context) {
-		c.HTML(http.StatusOK, "admin.html", gin.H{
-			"title":    "Administration",
-			"BasePath": BasePath,
-		})
-	})
-	r.POST("/activate", func(c *gin.Context) {
-		err := functions.ExportDB2Conf(database)
-		names, err := db.ListPoolNames(database)
-		c.HTML(http.StatusOK, "pools.html", gin.H{
-			"title":    "IP Blocklist Manager",
-			"message":  fmt.Sprintf("%v Pools importiert", len(names)),
-			"pools":    names,
-			"error":    err,
-			"BasePath": BasePath,
-		})
-	})
-
 	// Übersicht aller Pools
 	r.GET("/pools", func(c *gin.Context) {
 		names, err := db.ListPoolNames(database)
@@ -144,8 +113,43 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 		})
 	})
 
+	// Admin-Bereich
+	admin := dr.Group("/admin", gin.BasicAuth(gin.Accounts{
+		"dsrAdmin": "j?Fr@´@^>uA6K+1´w]", // user: admin, pass: secret
+	}))
+
+	// Adminseite
+	admin.GET("/", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "admin.html", gin.H{
+			"title":    "Administration",
+			"BasePath": BasePath,
+		})
+	})
+	admin.POST("/activate", func(c *gin.Context) {
+		err := functions.ExportDB2Conf(database)
+		names, err := db.ListPoolNames(database)
+		c.HTML(http.StatusOK, "pools.html", gin.H{
+			"title":    "IP Blocklist Manager",
+			"message":  fmt.Sprintf("%v Pools importiert", len(names)),
+			"pools":    names,
+			"error":    err,
+			"BasePath": BasePath,
+		})
+	})
+	admin.POST("/reset", func(c *gin.Context) {
+		err := functions.ResetDB(database)
+		names, err := db.ListPoolNames(database)
+		c.HTML(http.StatusOK, "pools.html", gin.H{
+			"title":    "IP Blocklist Manager",
+			"message":  fmt.Sprintf("%v Pools importiert", len(names)),
+			"pools":    names,
+			"error":    err,
+			"BasePath": BasePath,
+		})
+	})
+
 	// Detailseite für einen Pool
-	r.GET("/pools/:name", func(c *gin.Context) {
+	admin.GET("/pools/:name", func(c *gin.Context) {
 		poolName := c.Param("name")
 		entries, err := db.ListByPool(database, poolName)
 		if err != nil {
@@ -168,7 +172,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	})
 
 	// Pool exportieren
-	r.POST("/pools/:name/export", func(c *gin.Context) {
+	admin.POST("/pools/:name/export", func(c *gin.Context) {
 		poolName := c.Param("name")
 		wCount, bCount, err := functions.ExportConf(database, poolName, app.Config.OutputPath)
 		count := wCount + bCount
@@ -189,7 +193,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 		})
 	})
 	// Pool aktivieren
-	r.POST("/pools/:name/activate", func(c *gin.Context) {
+	admin.POST("/pools/:name/activate", func(c *gin.Context) {
 		poolName := c.Param("name")
 		wCount, bCount, err := functions.ExportConf(database, poolName, app.Config.OutputPath)
 		count := wCount + bCount
@@ -211,7 +215,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	})
 
 	// Pool whitelisten
-	r.POST("/pools/:name/whitelist", func(c *gin.Context) {
+	admin.POST("/pools/:name/whitelist", func(c *gin.Context) {
 		poolName := c.Param("name")
 		foundEntries, err := db.WhitelistPool(database, poolName)
 		if err != nil {
@@ -230,21 +234,21 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	})
 
 	// Pool blocken
-	r.POST("/pools/:name/block", func(c *gin.Context) {
+	admin.POST("/pools/:name/block", func(c *gin.Context) {
 		poolName := c.Param("name")
 		_ = db.BlockPool(database, poolName)
 		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
 	})
 
 	// Pool löschen
-	r.POST("/pools/:name/delete", func(c *gin.Context) {
+	admin.POST("/pools/:name/delete", func(c *gin.Context) {
 		poolName := c.Param("name")
 		_ = db.DeletePool(database, poolName)
 		c.Redirect(http.StatusSeeOther, BasePath+"/pools/")
 	})
 
 	// Eintrag hinzufügen
-	r.POST("/pools/:name/addIP", func(c *gin.Context) {
+	admin.POST("/pools/:name/addIP", func(c *gin.Context) {
 		poolName := c.Param("name")
 		cidr := strings.TrimSpace(c.PostForm("cidr"))
 		comment := strings.TrimSpace(c.PostForm("comment"))
@@ -280,7 +284,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	})
 
 	// Eintrag whitelisten
-	r.POST("/pools/:name/whitelistIP", func(c *gin.Context) {
+	admin.POST("/pools/:name/whitelistIP", func(c *gin.Context) {
 		poolName := c.Param("name")
 		entryID := c.PostForm("entryID")
 		var m string
@@ -296,7 +300,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	})
 
 	// Eintrag blocken
-	r.POST("/pools/:name/blockIP", func(c *gin.Context) {
+	admin.POST("/pools/:name/blockIP", func(c *gin.Context) {
 		poolName := c.Param("name")
 		entryID := c.PostForm("entryID")
 		var m string
@@ -312,7 +316,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	})
 
 	// Eintrag löschen
-	r.POST("/pools/:name/deleteIP", func(c *gin.Context) {
+	admin.POST("/pools/:name/deleteIP", func(c *gin.Context) {
 		poolName := c.Param("name")
 		entryID := c.PostForm("entryID")
 		if entryID != "" {
@@ -322,7 +326,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	})
 
 	// HTML: Upload einer *.conf mit ImportConf
-	r.POST("/pools/upload", func(c *gin.Context) {
+	admin.POST("/pools/upload", func(c *gin.Context) {
 		fileHeader, err := c.FormFile("file")
 		if err != nil {
 			c.HTML(http.StatusBadRequest, "pools.html", gin.H{

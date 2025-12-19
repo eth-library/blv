@@ -14,8 +14,8 @@
   </header>
       <ul class="menu container">
         <li><a href="{{ $.BasePath }}/" class="link-back">Zurück zur Startseite</a></li>
-        <li><a href="{{$.BasePath}}/pools/{{.poolName}}" class="link-back">Zurück zum Pool {{ .poolName }}</a></li>
         <li><a href="{{$.BasePath}}/pools" class="link-back">Zur Poolübersicht</a></li>
+        <li><a href="{{$.BasePath}}/admin/pools/{{.poolName}}" class="link-back">Zurück zum Pool {{ .poolName }}</a></li>
       </ul>
 
   <main>
@@ -48,7 +48,7 @@
             {{ range .entries }}
               <tr>
                 <td>{{ .CheckedIP }}</td>
-                <td><a href="{{$.BasePath}}/pools/{{ .Name }}">{{ .Name }}</a></td>
+                <td><a href="{{$.BasePath}}/admin/pools/{{ .Name }}">{{ .Name }}</a></td>
                 <td>{{ .CIDR }}</td>
                 <td>{{ .Comment }}</td>
               </tr>
