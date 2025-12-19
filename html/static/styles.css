@@ -223,6 +223,16 @@ button.btn-grey:hover {
   border-color: #666666;
 }
 
+button.btn-block {
+  border-color: #333333;
+  background: #333333;
+}
+
+button.btn-block:hover {
+  background: #000000;
+  border-color: #000000;
+}
+
 button.btn-danger {
   border-color: #c53030;
   background: #c53030;

@@ -152,6 +152,14 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	admin.GET("/pools/:name", func(c *gin.Context) {
 		poolName := c.Param("name")
 		entries, err := db.ListByPool(database, poolName)
+		wCount, bCount := functions.GetStatusCount(entries)
+		var poolStatus string
+		if wCount == 0 && bCount != 0 {
+			poolStatus = "b"
+		}
+		if bCount == 0 && wCount != 0 {
+			poolStatus = "w"
+		}
 		if err != nil {
 			c.HTML(http.StatusInternalServerError, "pool_detail.html", gin.H{
 				"title":    "Pool " + poolName,
@@ -163,11 +171,12 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 		errCode := c.Query("error")
 
 		c.HTML(http.StatusOK, "pool_detail.html", gin.H{
-			"title":    "Pool " + poolName,
-			"pool":     poolName,
-			"entries":  entries,
-			"error":    errCode,
-			"BasePath": BasePath,
+			"title":      "Pool " + poolName,
+			"pool":       poolName,
+			"poolStatus": poolStatus,
+			"entries":    entries,
+			"error":      errCode,
+			"BasePath":   BasePath,
 		})
 	})
 
@@ -219,7 +228,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 		poolName := c.Param("name")
 		foundEntries, err := db.WhitelistPool(database, poolName)
 		if err != nil {
-			c.Redirect(http.StatusInternalServerError, BasePath+"/pools/"+poolName+"?error=Fehler beim whitelisten")
+			c.Redirect(http.StatusInternalServerError, BasePath+"/admin/pools/"+poolName+"?error=Fehler beim whitelisten")
 		}
 		if foundEntries != nil {
 			c.HTML(http.StatusOK, "found.html", gin.H{
@@ -230,21 +239,21 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			})
 			return
 		}
-		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/pools/"+poolName)
 	})
 
 	// Pool blocken
 	admin.POST("/pools/:name/block", func(c *gin.Context) {
 		poolName := c.Param("name")
 		_ = db.BlockPool(database, poolName)
-		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/pools/"+poolName)
 	})
 
 	// Pool löschen
 	admin.POST("/pools/:name/delete", func(c *gin.Context) {
 		poolName := c.Param("name")
 		_ = db.DeletePool(database, poolName)
-		c.Redirect(http.StatusSeeOther, BasePath+"/pools/")
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/pools/")
 	})
 
 	// Eintrag hinzufügen
@@ -253,12 +262,12 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 		cidr := strings.TrimSpace(c.PostForm("cidr"))
 		comment := strings.TrimSpace(c.PostForm("comment"))
 		if cidr == "" {
-			c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+"?error=cidr_empty")
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/pools/"+poolName+"?error=cidr_empty")
 			return
 		}
 		existingEntry, err := db.InsertEntry(database, cidr, poolName, comment, "b")
 		if err != nil {
-			c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+"?error="+err.Error())
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/pools/"+poolName+"?error="+err.Error())
 			return
 		}
 		if existingEntry != nil {
@@ -280,11 +289,11 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 				"BasePath": BasePath,
 			})
 		}
-		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/pools/"+poolName)
 	})
 
 	// Eintrag whitelisten
-	admin.POST("/pools/:name/whitelistIP", func(c *gin.Context) {
+	admin.POST("/admin/pools/:name/whitelistIP", func(c *gin.Context) {
 		poolName := c.Param("name")
 		entryID := c.PostForm("entryID")
 		var m string
@@ -296,7 +305,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			m = "?error=Fehler beim Whitelisten - keine ID übergeben"
 			app.LogIt.Debug(m)
 		}
-		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+m)
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/pools/"+poolName+m)
 	})
 
 	// Eintrag blocken
@@ -312,7 +321,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			m = "?error=Fehler beim Blocken - keine ID übergeben"
 			app.LogIt.Debug(m)
 		}
-		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName+m)
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/pools/"+poolName+m)
 	})
 
 	// Eintrag löschen
@@ -322,7 +331,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 		if entryID != "" {
 			_ = db.DeleteByID(database, entryID)
 		}
-		c.Redirect(http.StatusSeeOther, BasePath+"/pools/"+poolName)
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/pools/"+poolName)
 	})
 
 	// HTML: Upload einer *.conf mit ImportConf
