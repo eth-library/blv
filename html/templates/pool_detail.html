@@ -39,9 +39,11 @@
         <form method="post" action="{{ $.BasePath }}/admin/pools/{{ .pool }}/export">
           <button type="submit" class="btn-grey">gesamten Pool exportieren</button>
         </form>
+        {{ if ne .poolStatus ""}}
         <form method="post" action="{{ $.BasePath }}/admin/pools/{{ .pool }}/activate">
           <button type="submit" class="btn">gesamten Pool aktivieren</button>
         </form>
+        {{ end }}
         {{ if ne .poolStatus "w" }}
           <form method="post" action="{{ $.BasePath }}/admin/pools/{{ .pool }}/whitelist" onsubmit="return confirm('Das ändert den gesamten Pool! Sicher?');">
             <button type="submit" class="btn-green">gesamten Pool whitelisten</button>
@@ -118,7 +120,7 @@
 
       <section class="card">
         <h3>Neuen CIDR hinzufügen</h3>
-        <form method="post" action="{{ $.BasePath }}/admin/pools/{{ .pool }}/addIP" novalidate>
+        <form method="post" action="{{ $.BasePath }}/admin/pools/{{ $.pool }}/addIP" novalidate>
           <div class="field-group">
             <label for="cidr">CIDR</label>
             <input type="text" id="cidr" name="cidr" placeholder="z. B. 192.168.1.0/24">

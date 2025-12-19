@@ -204,7 +204,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	// Pool aktivieren
 	admin.POST("/pools/:name/activate", func(c *gin.Context) {
 		poolName := c.Param("name")
-		wCount, bCount, err := functions.ExportConf(database, poolName, app.Config.OutputPath)
+		wCount, bCount, err := functions.ExportConf(database, poolName, app.Config.ListPath)
 		count := wCount + bCount
 		if err != nil {
 			c.HTML(http.StatusSeeOther, "pool_detail.html", gin.H{
@@ -293,7 +293,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	})
 
 	// Eintrag whitelisten
-	admin.POST("/admin/pools/:name/whitelistIP", func(c *gin.Context) {
+	admin.POST("/pools/:name/whitelistIP", func(c *gin.Context) {
 		poolName := c.Param("name")
 		entryID := c.PostForm("entryID")
 		var m string
