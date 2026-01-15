@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/SvenKethz/blv/internal/helpers"
+	"github.com/SvenKethz/fairdb/internal/helpers"
 	"gopkg.in/yaml.v3"
 )
 
@@ -30,6 +30,11 @@ type ApplicationConfig struct {
 	BasePath       string    `yaml:"basePath"`
 	WebPort        int       `yaml:"webPort"`
 	TrustedProxies []string  `yaml:"trustedProxies"`
+	DateLayout          string    `yaml:"DateLayout"`
+	OutputFolder        string    `yaml:"OutputFolder"`
+	DefaultFile2analyze string    `yaml:"DefaultLog2analyze"`
+	LogType             string    `yaml:"LogType"`
+	LogFormat           string    `yaml:"LogFormat"`
 	Logcfg         LogConfig `yaml:"LogConfig"`
 }
 
@@ -62,7 +67,7 @@ func (Config *ApplicationConfig) Initialize(ConfigPath *string) {
 
 func (config *ApplicationConfig) setDefaults() {
 	*config = ApplicationConfig{
-		DbPath:         "./blv.db",
+		DbPath:         "./fairdb.db",
 		ListPath:       "./",
 		BackupPath:     "./backup/",
 		OutputPath:     "./output/",
@@ -70,6 +75,10 @@ func (config *ApplicationConfig) setDefaults() {
 		BasePath:       "",
 		WebPort:        8080,
 		TrustedProxies: []string{"127.0.0.1"},
+		DateLayout:   "02/Jan/2006:15:04:05 -0700",
+		OutputFolder: "./output/",
+		LogType:      "apache",
+		LogFormat:    "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\"",
 		Logcfg: LogConfig{
 			LogLevel:  "INFO",
 			LogFolder: "./logs/",
@@ -86,6 +95,11 @@ func (c *ApplicationConfig) CheckConfig() {
 	// check if the log folder exists
 	if !helpers.CheckIfDir(c.Logcfg.LogFolder) {
 		helpers.ToBeCreated(c.Logcfg.LogFolder)
+	}
+	helpers.Checknaddtrailingslash(&c.OutputFolder)
+	// check if the output folder exists
+	if !helpers.CheckIfDir(c.OutputFolder) {
+		helpers.ToBeCreated(c.OutputFolder)
 	}
 }
 

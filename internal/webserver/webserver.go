@@ -10,10 +10,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	app "github.com/SvenKethz/blv/internal/configuration"
-	"github.com/SvenKethz/blv/internal/db"
-	"github.com/SvenKethz/blv/internal/functions"
-	"github.com/SvenKethz/blv/internal/helpers"
+	app "github.com/SvenKethz/fairdb/internal/configuration"
+	"github.com/SvenKethz/fairdb/internal/db"
+	"github.com/SvenKethz/fairdb/internal/functions"
+	"github.com/SvenKethz/fairdb/internal/helpers"
 )
 
 func NewRouter(database *sql.DB, BasePath string) *gin.Engine {

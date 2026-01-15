@@ -6,18 +6,17 @@ import (
 	"log"
 	"os"
 
-	app "github.com/SvenKethz/blv/internal/configuration"
-	"github.com/SvenKethz/blv/internal/db"
-	"github.com/SvenKethz/blv/internal/functions"
-	"github.com/SvenKethz/blv/internal/helpers"
-	"github.com/SvenKethz/blv/internal/webserver"
+	app "github.com/SvenKethz/fairdb/internal/configuration"
+	"github.com/SvenKethz/fairdb/internal/db"
+	"github.com/SvenKethz/fairdb/internal/functions"
+	"github.com/SvenKethz/fairdb/internal/helpers"
+	"github.com/SvenKethz/fairdb/internal/webserver"
 )
 
 var (
 	_, ApplicationName = helpers.SeparateFileFromPath(os.Args[0])
-	ConfigPath         = flag.String("c", "/etc/blv/conf.d/blv.yml", "use -c to provide a custom path to the config file")
+	ConfigPath         = flag.String("c", "/etc/fairdb/conf.d/fairdb.yml", "use -c to provide a custom path to the config file")
 	DBinit             = flag.Bool("init", false, "Neuaufbau der Datenbank erzwingen")
-	LutFolder          = flag.String("lf", "./luts", "IP-Host-Listen laden")
 	Reset              = flag.Bool("reset", false, "Neuaufbau der Datenbank erzwingen")
 )
 
@@ -64,14 +63,7 @@ func main() {
 		}
 		defer database.Close()
 
-		if helpers.FlagIsPassed("lf") {
-			fmt.Println("werde die Lut-Einträge von ", *LutFolder, " laden")
-			app.LogIt.Info("werde die Lut-Einträge von ", *LutFolder, " laden")
-			helpers.Checknaddtrailingslash(LutFolder)
-			if errLL := functions.LoadLuts(database, *LutFolder); errLL != nil {
-				log.Fatalf("Fehler beim Laden der Luts von %s: %v", *LutFolder, errLL)
-			}
-		} else if *Reset {
+		if *Reset {
 			app.LogIt.Info("Die DB wird nun zurückgesetzt und die Apache-Listen neu geladen - was kann etwas dauern.")
 			fmt.Println("Die DB wird nun zurückgesetzt und die Apache-Listen neu geladen - was kann etwas dauern.")
 			functions.ResetDB(database)

@@ -3,7 +3,6 @@ package functions
 import (
 	"bufio"
 	"database/sql"
-	"encoding/csv"
 	"fmt"
 	"io"
 	"os"
@@ -11,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	app "github.com/SvenKethz/blv/internal/configuration"
-	"github.com/SvenKethz/blv/internal/db"
-	"github.com/SvenKethz/blv/internal/helpers"
+	app "github.com/SvenKethz/fairdb/internal/configuration"
+	"github.com/SvenKethz/fairdb/internal/db"
+	"github.com/SvenKethz/fairdb/internal/helpers"
 )
 
 func ImportConf(database *sql.DB, r io.Reader, poolName string, status string) error {
@@ -256,75 +255,4 @@ func LoadConfigs(database *sql.DB, entries []os.DirEntry, filesPath, status stri
 		}
 	}
 	return nil
-}
-
-func LoadLuts(database *sql.DB, folder string) error {
-	app.LogIt.Info("importiere csv files von ", folder, " in die db.lut")
-
-	csvFiles, err := os.ReadDir(folder)
-	if err != nil {
-		app.LogIt.Error(fmt.Sprintf("Fehler beim Lesen der csv files: %v", err))
-	} else {
-		app.LogIt.Info(fmt.Sprintf("%d Dateien in %s gefunden", len(csvFiles), folder))
-		fmt.Printf("%d Dateien in %s gefunden\n", len(csvFiles), folder)
-	}
-
-	for _, ipList := range csvFiles {
-		if filepath.Ext(ipList.Name()) == ".txt" {
-			app.LogIt.Info("bearbeite " + ipList.Name() + " in " + folder)
-			file, err := os.Open(folder + ipList.Name())
-			if err != nil {
-				app.LogIt.Error(fmt.Sprintf("Fehler beim Öffnen von %s: %v", ipList.Name(), err))
-				fmt.Printf("Fehler beim Öffnen von %s: %v\n", ipList.Name(), err)
-			} else {
-				_, err = ImportLut(database, file, ipList.Name())
-				if err != nil {
-					app.LogIt.Error("Fehler beim importieren von %s: %v", ipList.Name(), err)
-				}
-			}
-			defer file.Close()
-		} else {
-			app.LogIt.Info(ipList.Name() + "ist keine .txt - Datei")
-		}
-	}
-	return err
-}
-
-func ImportLut(database *sql.DB, file io.Reader, fileName string) (int, error) {
-	reader := csv.NewReader(file)
-	// Optional: Konfiguration
-	reader.Comma = ','          // Trennzeichen
-	reader.Comment = '#'        // Kommentarzeichen
-	reader.FieldsPerRecord = -1 // Variable Anzahl Felder erlauben
-	reader.TrimLeadingSpace = true
-
-	lineNumber := 0
-
-	for {
-		record, err := reader.Read()
-		if err == io.EOF {
-			break // Ende der Datei erreicht
-		}
-		if err != nil {
-			app.LogIt.Error(fmt.Sprintf("Fehler in Zeile %d: %v", lineNumber, err))
-			continue // Überspringe fehlerhafte Zeilen
-		}
-
-		lineNumber++
-
-		// Verarbeite die Zeile
-		if err := db.InsertLutItem(database, record[0], record[1]); err != nil {
-			return lineNumber, fmt.Errorf("Fehler beim Import von Zeile %d: %s,%s :: %w", lineNumber, record[0], record[1], err)
-		} else {
-			if lineNumber%1000 == 0 {
-				app.LogIt.Info(fmt.Sprintf("%d Zeilen von %s geladen", lineNumber, fileName))
-			}
-			if lineNumber%10000 == 0 {
-				fmt.Printf("%d Zeilen von %s geladen\n", lineNumber, fileName)
-			}
-		}
-	}
-
-	fmt.Printf("Verarbeitet: %d Zeilen\n", lineNumber)
-	return lineNumber, nil
 }

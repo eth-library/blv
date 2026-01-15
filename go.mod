@@ -1,4 +1,4 @@
-module github.com/SvenKethz/blv
+module github.com/SvenKethz/fairdb
 
 go 1.24.0
 

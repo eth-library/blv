@@ -3,15 +3,14 @@ package db
 import (
 	"database/sql"
 	"fmt"
-	"net"
 	"regexp"
 	"strings"
 
 	// _ "github.com/mattn/go-sqlite3"
 	_ "modernc.org/sqlite"
 
-	app "github.com/SvenKethz/blv/internal/configuration"
-	"github.com/SvenKethz/blv/internal/helpers"
+	app "github.com/SvenKethz/fairdb/internal/configuration"
+	"github.com/SvenKethz/fairdb/internal/helpers"
 )
 
 type PoolEntry struct {
@@ -106,16 +105,6 @@ func InsertPoollistEntry(dbConn *sql.DB, cidrString, name, comment, status strin
 		startIP, endIP, cidrString, name, comment, status,
 	)
 
-	return err
-}
-
-func InsertLutItem(dbConn *sql.DB, ip_addr string, name string) error {
-	ipNet := net.ParseIP(ip_addr)
-	ip_int := helpers.IPToUint32(ipNet)
-	_, err := dbConn.Exec(
-		"INSERT INTO lut(ip_int, name) VALUES(?, ?)",
-		ip_int, name,
-	)
 	return err
 }
 
