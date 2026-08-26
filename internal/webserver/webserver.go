@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -16,6 +19,77 @@ import (
 	"github.com/SvenKethz/fairdb/internal/helpers"
 )
 
+// groupStatusLabel übersetzt den internen Status ("w"/"b"/"") in eine
+// sprechende Bezeichnung für UI und API.
+func groupStatusLabel(status string) string {
+	switch status {
+	case "w":
+		return "whitelisted"
+	case "b":
+		return "blocked"
+	default:
+		return "inaktiv"
+	}
+}
+
+// PoolSummary fasst den Status eines Pools innerhalb einer Gruppe zusammen.
+type PoolSummary struct {
+	Name   string
+	Status string // "w", "b" oder "" (gemischt/keine Einträge)
+}
+
+func poolSummariesForGroup(database *sql.DB, groupName string) ([]PoolSummary, error) {
+	poolNames, err := db.ListPoolNamesInGroup(database, groupName)
+	if err != nil {
+		return nil, err
+	}
+	summaries := make([]PoolSummary, 0, len(poolNames))
+	for _, poolName := range poolNames {
+		entries, err := db.ListByPool(database, poolName)
+		if err != nil {
+			return nil, err
+		}
+		wCount, bCount := functions.GetStatusCount(entries)
+		status := ""
+		if wCount == 0 && bCount != 0 {
+			status = "b"
+		}
+		if bCount == 0 && wCount != 0 {
+			status = "w"
+		}
+		summaries = append(summaries, PoolSummary{Name: poolName, Status: status})
+	}
+	return summaries, nil
+}
+
+// ConfFileInfo beschreibt eine bereits exportierte .conf-Datei für die
+// Aktivieren-Übersicht (welche Dateien liegen aktuell in whitelistPath/
+// blocklistPath).
+type ConfFileInfo struct {
+	Name    string
+	ModTime string
+}
+
+func listConfFiles(path string) ([]ConfFileInfo, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]ConfFileInfo, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".conf" {
+			continue
+		}
+		modTime := ""
+		if info, err := e.Info(); err == nil {
+			modTime = info.ModTime().Format("2006-01-02 15:04")
+		}
+		files = append(files, ConfFileInfo{Name: e.Name(), ModTime: modTime})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].Name < files[j].Name })
+	return files, nil
+}
+
 func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	dr := gin.Default()
 	dr.SetTrustedProxies(app.Config.TrustedProxies)
@@ -24,6 +98,9 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	// Statische Dateien bereitstellen
 	r.Static("/static", app.Config.WebfilesPath+"static")
 	r.StaticFile("/favicon.ico", app.Config.WebfilesPath+"/static/favicon.ico")
+
+	// Bearer-Auth-geschütztes JSON-API für externe Systeme
+	RegisterAPIRoutes(r, database)
 
 	r.GET("/", func(c *gin.Context) {
 		c.HTML(http.StatusOK, "index.html", gin.H{
@@ -113,9 +190,30 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 		})
 	})
 
+	// Übersicht aller Gruppen
+	r.GET("/groups", func(c *gin.Context) {
+		groups, err := db.ListGroups(database)
+		if err != nil {
+			c.HTML(http.StatusInternalServerError, "groups.html", gin.H{
+				"title":    "Gruppen",
+				"error":    fmt.Sprintf("Fehler beim Laden der Gruppen: %v", err),
+				"BasePath": BasePath,
+			})
+			return
+		}
+		c.HTML(http.StatusOK, "groups.html", gin.H{
+			"title":    "Gruppen",
+			"groups":   groups,
+			"BasePath": BasePath,
+		})
+	})
+
 	// Admin-Bereich
+	// Zugangsdaten kommen aus der optionalen envFile (siehe app.AdminUser/
+	// app.AdminPassword), Default ist admin/1234, falls keine envFile
+	// konfiguriert ist oder die Werte dort fehlen.
 	admin := dr.Group("/admin", gin.BasicAuth(gin.Accounts{
-		"dsrAdmin": "j?Fr@´@^>uA6K+1´w]", // user: admin, pass: secret
+		app.AdminUser: app.AdminPassword,
 	}))
 
 	// Adminseite
@@ -125,27 +223,217 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			"BasePath": BasePath,
 		})
 	})
+	// Konfiguration aktivieren: zeigt die aktuell exportierten Whitelist-/
+	// Blocklist-Dateien und bietet den Button zum (Neu-)Aktivieren.
+	admin.GET("/activate", func(c *gin.Context) {
+		whitelistFiles, wErr := listConfFiles(app.Config.WhitelistPath)
+		blocklistFiles, bErr := listConfFiles(app.Config.BlocklistPath)
+		var errors []string
+		if wErr != nil {
+			errors = append(errors, fmt.Sprintf("Whitelist-Verzeichnis (%s): %v", app.Config.WhitelistPath, wErr))
+		}
+		if bErr != nil {
+			errors = append(errors, fmt.Sprintf("Blocklist-Verzeichnis (%s): %v", app.Config.BlocklistPath, bErr))
+		}
+		if errParam := c.Query("error"); errParam != "" {
+			errors = append(errors, errParam)
+		}
+		c.HTML(http.StatusOK, "activate.html", gin.H{
+			"title":          "Konfiguration aktivieren",
+			"whitelistPath":  app.Config.WhitelistPath,
+			"blocklistPath":  app.Config.BlocklistPath,
+			"whitelistFiles": whitelistFiles,
+			"blocklistFiles": blocklistFiles,
+			"message":        c.Query("message"),
+			"errors":         errors,
+			"BasePath":       BasePath,
+		})
+	})
+	// Aktiviert die Konfiguration: exportiert die komplette DB in die
+	// konfigurierten Verzeichnisse und löst den Apache-Reload aus.
 	admin.POST("/activate", func(c *gin.Context) {
-		err := functions.ExportDB2Conf(database)
-		names, err := db.ListPoolNames(database)
-		c.HTML(http.StatusOK, "pools.html", gin.H{
-			"title":    "IP Blocklist Manager",
-			"message":  fmt.Sprintf("%v Pools importiert", len(names)),
-			"pools":    names,
-			"error":    err,
+		if err := functions.ExportDB2Conf(database); err != nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/activate?error="+url.QueryEscape(err.Error()))
+			return
+		}
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/activate?message="+url.QueryEscape("Konfiguration aktiviert, Apache wurde neu geladen."))
+	})
+
+	// Gruppenübersicht (Admin)
+	admin.GET("/groups", func(c *gin.Context) {
+		groups, err := db.ListGroups(database)
+		if err != nil {
+			c.HTML(http.StatusInternalServerError, "groups.html", gin.H{
+				"title":    "Gruppen",
+				"error":    fmt.Sprintf("Fehler beim Laden der Gruppen: %v", err),
+				"BasePath": BasePath,
+			})
+			return
+		}
+		c.HTML(http.StatusOK, "groups.html", gin.H{
+			"title":    "Gruppen",
+			"groups":   groups,
 			"BasePath": BasePath,
 		})
 	})
-	admin.POST("/reset", func(c *gin.Context) {
-		err := functions.ResetDB(database)
-		names, err := db.ListPoolNames(database)
-		c.HTML(http.StatusOK, "pools.html", gin.H{
-			"title":    "IP Blocklist Manager",
-			"message":  fmt.Sprintf("%v Pools importiert", len(names)),
-			"pools":    names,
-			"error":    err,
-			"BasePath": BasePath,
+
+	// Gruppe anlegen
+	admin.POST("/groups", func(c *gin.Context) {
+		groupName := strings.TrimSpace(c.PostForm("name"))
+		if groupName == "" {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups?error=Gruppenname fehlt")
+			return
+		}
+		if err := db.EnsureGroup(database, groupName); err != nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups?error="+err.Error())
+			return
+		}
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName)
+	})
+
+	// Detailseite für eine Gruppe
+	admin.GET("/groups/:name", func(c *gin.Context) {
+		groupName := c.Param("name")
+		status, found, err := db.GetGroupStatus(database, groupName)
+		if err != nil || !found {
+			c.HTML(http.StatusNotFound, "group_detail.html", gin.H{
+				"title":    "Gruppe " + groupName,
+				"error":    "Gruppe nicht gefunden",
+				"BasePath": BasePath,
+			})
+			return
+		}
+		pools, err := poolSummariesForGroup(database, groupName)
+		if err != nil {
+			c.HTML(http.StatusInternalServerError, "group_detail.html", gin.H{
+				"title":    "Gruppe " + groupName,
+				"error":    fmt.Sprintf("Fehler beim Laden der Gruppe: %v", err),
+				"BasePath": BasePath,
+			})
+			return
+		}
+		c.HTML(http.StatusOK, "group_detail.html", gin.H{
+			"title":       "Gruppe " + groupName,
+			"group":       groupName,
+			"groupStatus": status,
+			"pools":       pools,
+			"error":       c.Query("error"),
+			"message":     c.Query("message"),
+			"BasePath":    BasePath,
 		})
+	})
+
+	// Gruppe whitelisten (blockte Pools verhindern das Whitelisten, siehe db.WhitelistPool)
+	admin.POST("/groups/:name/whitelist", func(c *gin.Context) {
+		groupName := c.Param("name")
+		conflicts, _, _, err, reloadErr := functions.WhitelistGroup(database, groupName)
+		if err != nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+err.Error())
+			return
+		}
+		if conflicts != nil {
+			c.HTML(http.StatusOK, "found.html", gin.H{
+				"title":    "Gruppe " + groupName,
+				"error":    fmt.Sprintf("%v Einträge sind anderswo geblockt - bitte erst lösen", len(conflicts)),
+				"entries":  conflicts,
+				"poolName": groupName,
+				"BasePath": BasePath,
+			})
+			return
+		}
+		if reloadErr != nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error=Gruppe whitelisted, aber Apache-Reload fehlgeschlagen: "+reloadErr.Error())
+			return
+		}
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName)
+	})
+
+	// Gruppe blocken
+	admin.POST("/groups/:name/block", func(c *gin.Context) {
+		groupName := c.Param("name")
+		_, _, err, reloadErr := functions.BlockGroup(database, groupName)
+		if err != nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+err.Error())
+			return
+		}
+		if reloadErr != nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error=Gruppe geblockt, aber Apache-Reload fehlgeschlagen: "+reloadErr.Error())
+			return
+		}
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName)
+	})
+
+	// Gruppe manuell (re-)aktivieren (Export + Apache-Reload), ohne Statusänderung
+	admin.POST("/groups/:name/activate", func(c *gin.Context) {
+		groupName := c.Param("name")
+		wCount, bCount, exportErr, reloadErr := functions.ActivateGroup(database, groupName)
+		if exportErr != nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+exportErr.Error())
+			return
+		}
+		if reloadErr != nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error=Exportiert ("+fmt.Sprintf("%v", wCount+bCount)+" Einträge), aber Apache-Reload fehlgeschlagen: "+reloadErr.Error())
+			return
+		}
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName)
+	})
+
+	// Gruppe löschen (enthaltene Pools werden ungruppiert, nicht gelöscht)
+	admin.POST("/groups/:name/delete", func(c *gin.Context) {
+		groupName := c.Param("name")
+		_ = db.DeleteGroup(database, groupName)
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups")
+	})
+
+	// Pool einer Gruppe zuweisen
+	admin.POST("/groups/:name/assignPool", func(c *gin.Context) {
+		groupName := c.Param("name")
+		poolName := strings.TrimSpace(c.PostForm("poolName"))
+		if poolName == "" {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error=Poolname fehlt")
+			return
+		}
+		if err := db.AssignPoolToGroup(database, poolName, groupName); err != nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+err.Error())
+			return
+		}
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName)
+	})
+
+	// Datei-Upload direkt in eine Gruppe: legt (analog zu /admin/pools/upload)
+	// einen neuen Pool aus der hochgeladenen Datei an und weist ihn sofort
+	// dieser Gruppe zu.
+	admin.POST("/groups/:name/uploadPool", func(c *gin.Context) {
+		groupName := c.Param("name")
+		fileHeader, err := c.FormFile("file")
+		if err != nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape("Datei wurde nicht übermittelt."))
+			return
+		}
+
+		poolName := strings.TrimSuffix(fileHeader.Filename, filepath.Ext(fileHeader.Filename))
+		if poolName == "" {
+			poolName = "default"
+		}
+
+		f, err := fileHeader.Open()
+		if err != nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape("Fehler beim Öffnen der Datei."))
+			return
+		}
+		defer f.Close()
+
+		zielStatus := c.PostForm("zielStatus")
+
+		if err := functions.ImportConf(database, f, poolName, zielStatus); err != nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape("Importfehler: "+err.Error()))
+			return
+		}
+		if err := db.AssignPoolToGroup(database, poolName, groupName); err != nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape("Pool '"+poolName+"' importiert, aber Gruppenzuweisung fehlgeschlagen: "+err.Error()))
+			return
+		}
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?message="+url.QueryEscape("Pool '"+poolName+"' importiert und der Gruppe zugewiesen."))
 	})
 
 	// Detailseite für einen Pool
@@ -169,57 +457,19 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			return
 		}
 		errCode := c.Query("error")
+		groupName, _, err := db.GetPoolGroup(database, poolName)
+		if err != nil {
+			app.LogIt.Debug(fmt.Sprintf("Fehler beim Ermitteln der Gruppe von Pool %s: %v", poolName, err))
+		}
 
 		c.HTML(http.StatusOK, "pool_detail.html", gin.H{
 			"title":      "Pool " + poolName,
 			"pool":       poolName,
 			"poolStatus": poolStatus,
+			"group":      groupName,
 			"entries":    entries,
 			"error":      errCode,
 			"BasePath":   BasePath,
-		})
-	})
-
-	// Pool exportieren
-	admin.POST("/pools/:name/export", func(c *gin.Context) {
-		poolName := c.Param("name")
-		wCount, bCount, err := functions.ExportConf(database, poolName, app.Config.OutputPath)
-		count := wCount + bCount
-		if err != nil {
-			c.HTML(http.StatusSeeOther, "pool_detail.html", gin.H{
-				"title":    "Pool " + poolName,
-				"error":    fmt.Sprintf("Fehler beim Export des Pools: %v", err),
-				"BasePath": BasePath,
-			})
-			return
-		}
-		entries, err := db.ListByPool(database, poolName)
-		c.HTML(http.StatusOK, "pool_detail.html", gin.H{
-			"title":    "Pool " + poolName,
-			"message":  fmt.Sprintf("%v items exportiert", count),
-			"entries":  entries,
-			"BasePath": BasePath,
-		})
-	})
-	// Pool aktivieren
-	admin.POST("/pools/:name/activate", func(c *gin.Context) {
-		poolName := c.Param("name")
-		wCount, bCount, err := functions.ExportConf(database, poolName, app.Config.ListPath)
-		count := wCount + bCount
-		if err != nil {
-			c.HTML(http.StatusSeeOther, "pool_detail.html", gin.H{
-				"title":    "Pool " + poolName,
-				"error":    fmt.Sprintf("Fehler beim Export des Pools: %v", err),
-				"BasePath": BasePath,
-			})
-			return
-		}
-		entries, err := db.ListByPool(database, poolName)
-		c.HTML(http.StatusOK, "pool_detail.html", gin.H{
-			"title":    "Pool " + poolName,
-			"message":  fmt.Sprintf("%v items exportiert", count),
-			"entries":  entries,
-			"BasePath": BasePath,
 		})
 	})
 
@@ -253,7 +503,10 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	admin.POST("/pools/:name/delete", func(c *gin.Context) {
 		poolName := c.Param("name")
 		_ = db.DeletePool(database, poolName)
-		c.Redirect(http.StatusSeeOther, BasePath+"/admin/pools/")
+		// "/admin/pools/" (ohne Namen) ist keine registrierte Route (nur
+		// "/admin/pools/:name") - auf die tatsächlich existierende
+		// Poolübersicht umleiten, wie auch die anderen Templates es tun.
+		c.Redirect(http.StatusSeeOther, BasePath+"/pools")
 	})
 
 	// Eintrag hinzufügen

@@ -15,6 +15,7 @@
       <ul class="menu container">
         <li><a href="{{ $.BasePath }}/" class="link-back">Zurück zur Startseite</a></li>
         <li><a href="{{$.BasePath}}/pools" class="link-back">Zur Poolübersicht</a></li>
+        <li><a href="{{$.BasePath}}/admin/groups" class="link-back">Zur Gruppenübersicht</a></li>
       </ul>
 
   <main>
@@ -58,16 +59,9 @@
           </form>
       </section>
         <section class="card">
-          <h2>DB in Configs exportieren (produktiv!)</h2>
-          <form method="post" action="{{ $.BasePath }}/admin/activate" onsubmit="return confirm('Das exportiert / überschreibt aktuelle conf-Listen! Der Webserver muss anschliessend re-loaded werden. Sicher?');">
-            <button type="submit">aktivieren</button>
-          </form>
-      </section>
-        <section class="card">
-          <h2>reset DB</h2>
-          <form method="post" action="{{ $.BasePath }}/admin/reset" onsubmit="return confirm('Das leert die gesamte Datenbank und lädt die Apache-Blocklisten neu ein! Sicher?');">
-            <button type="submit">RESET</button>
-          </form>
+          <h2>Konfiguration aktivieren</h2>
+          <p class="hint">Zeigt die aktuell exportierten Whitelist-/Blocklist-Dateien und exportiert die komplette DB neu (mit automatischem Apache-Reload).</p>
+          <a href="{{ $.BasePath }}/admin/activate" class="link-item">Zur Aktivierung →</a>
       </section>
 </div>
 

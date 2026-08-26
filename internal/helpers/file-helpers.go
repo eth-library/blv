@@ -1,7 +1,9 @@
 package helpers
 
 import (
+	"archive/tar"
 	"bufio"
+	"compress/gzip"
 	"fmt"
 	"hash"
 	"io"
@@ -35,22 +37,18 @@ func CheckIfDir(path string) bool {
 	}
 }
 
-func ToBeCreated(path string) {
-	fmt.Println("the folder " + path + " is missing")
-	var anlegen string
-	yes := []string{"j", "J", "y", "Y"}
-	fmt.Print("shall I create it? (y|n) [n]: ")
-	fmt.Scanln(&anlegen)
-	if StringInSlice(anlegen, yes) {
-		if err := os.MkdirAll(path, 0o750); err != nil && !os.IsExist(err) {
-			fmt.Println(err)
-		} else {
-			fmt.Println("OK, " + path + " successfully created")
-		}
-	} else {
-		fmt.Println("the folder " + path + " does not exist but is required")
-		fmt.Println("the service will shut down now")
+// EnsureDir legt path an, falls es noch nicht existiert. Läuft ohne
+// Rückfrage (im Gegensatz zum früheren, interaktiven ToBeCreated), da der
+// Aufruf auch beim unbeaufsichtigten Start als systemd-Service passieren muss.
+func EnsureDir(path string) error {
+	if CheckIfDir(path) {
+		return nil
 	}
+	if err := os.MkdirAll(path, 0o750); err != nil && !os.IsExist(err) {
+		return err
+	}
+	fmt.Println("Verzeichnis angelegt: " + path)
+	return nil
 }
 
 func FileExists(filename string) bool {
@@ -67,38 +65,88 @@ func SeparateFileFromPath(fullpath string) (path string, filename string) {
 	return path, filename
 }
 
-func BackupFiles(sourcePath, fileExtension, backupPath string) error {
-	filesBackuped := 0
-	if err := os.MkdirAll(backupPath, 0o750); err != nil && !os.IsExist(err) {
-		fmt.Println(err)
-		return err
-	}
-
-	entries, err := os.ReadDir(sourcePath)
+// TarGzDir packt alle Dateien aus sourceDir (nicht rekursiv - passend für die
+// flachen whitelistPath/blocklistPath-Verzeichnisse) in ein gzip-komprimiertes
+// tar-Archiv und schreibt es nach destFile.
+func TarGzDir(sourceDir, destFile string) error {
+	entries, err := os.ReadDir(sourceDir)
 	if err != nil {
-		fmt.Printf("Fehler beim Lesen der Dateien zum Backup: %v", err)
 		return err
 	}
 
-	for _, file2backup := range entries {
-		if filepath.Ext(file2backup.Name()) == fileExtension {
-			// file kopieren
-			srcPath := filepath.Join(sourcePath, file2backup.Name())
-			dstPath := filepath.Join(backupPath, file2backup.Name())
+	out, err := os.Create(destFile)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
 
-			data, err := os.ReadFile(srcPath)
-			if err != nil {
-				return err
-			}
-			// Rechte ggf. aus Stat übernehmen
-			if err := os.WriteFile(dstPath, data, 0o644); err != nil {
-				return err
-			}
-			filesBackuped++
+	gzw := gzip.NewWriter(out)
+	tw := tar.NewWriter(gzw)
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		data, err := os.ReadFile(filepath.Join(sourceDir, entry.Name()))
+		if err != nil {
+			return err
+		}
+		header := &tar.Header{
+			Name:    entry.Name(),
+			Mode:    int64(info.Mode().Perm()),
+			Size:    int64(len(data)),
+			ModTime: info.ModTime(),
+		}
+		if err := tw.WriteHeader(header); err != nil {
+			return err
+		}
+		if _, err := tw.Write(data); err != nil {
+			return err
 		}
 	}
-	fmt.Println(filesBackuped, "Dateien von", sourcePath, "nach", backupPath, "gesichert")
-	return nil
+
+	if err := tw.Close(); err != nil {
+		return err
+	}
+	return gzw.Close()
+}
+
+// ParseEnvFile liest eine einfache .env-Datei (KEY=VALUE pro Zeile,
+// '#'-Kommentare und Leerzeilen werden ignoriert).
+func ParseEnvFile(path string) (map[string]string, error) {
+	values := make(map[string]string)
+
+	file, err := os.Open(path)
+	if err != nil {
+		return values, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, found := strings.Cut(line, "=")
+		if !found {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, `"'`)
+		if key != "" {
+			values[key] = value
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return values, err
+	}
+	return values, nil
 }
 
 func CheckSum(hashAlgorithm hash.Hash, filename string) (string, error) {

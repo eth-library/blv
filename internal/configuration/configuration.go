@@ -12,30 +12,40 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	DefaultAdminUser     = "admin"
+	DefaultAdminPassword = "1234"
+)
+
 var (
 	_, ApplicationName = helpers.SeparateFileFromPath(os.Args[0])
 	Config             ApplicationConfig
 	LogIt              *slog.Logger
+
+	// aus der optionalen envFile geladen (siehe ApplicationConfig.EnvFile);
+	// AdminUser/AdminPassword schützen den Admin-Bereich (Basic Auth), APIToken
+	// den Bearer-geschützten API-Zugriff. Ohne envFile bzw. ohne gesetzte Werte
+	// gelten die Defaults; ein leerer APIToken deaktiviert das API.
+	AdminUser     = DefaultAdminUser
+	AdminPassword = DefaultAdminPassword
+	APIToken      = ""
 )
 
 // configuration structures
 // ========================
 
 type ApplicationConfig struct {
-	DbPath         string    `yaml:"dbPath"`
-	ListPath       string    `yaml:"listPath"`
-	OutputPath     string    `yaml:"outputPath"`
-	BackupPath     string    `yaml:"backupPath"`
-	WebfilesPath   string    `yaml:"webfilesPath"`
-	BasePath       string    `yaml:"basePath"`
-	WebPort        int       `yaml:"webPort"`
-	TrustedProxies []string  `yaml:"trustedProxies"`
-	DateLayout          string    `yaml:"DateLayout"`
-	OutputFolder        string    `yaml:"OutputFolder"`
-	DefaultFile2analyze string    `yaml:"DefaultLog2analyze"`
-	LogType             string    `yaml:"LogType"`
-	LogFormat           string    `yaml:"LogFormat"`
-	Logcfg         LogConfig `yaml:"LogConfig"`
+	DbPath              string    `yaml:"dbPath"`
+	WhitelistPath       string    `yaml:"whitelistPath"`
+	BlocklistPath       string    `yaml:"blocklistPath"`
+	BackupPath          string    `yaml:"backupPath"`
+	WebfilesPath        string    `yaml:"webfilesPath"`
+	BasePath            string    `yaml:"basePath"`
+	WebPort             int       `yaml:"webPort"`
+	TrustedProxies      []string  `yaml:"trustedProxies"`
+	EnvFile             string    `yaml:"envFile"`
+	ApacheReloadCommand []string  `yaml:"apacheReloadCommand"`
+	Logcfg              LogConfig `yaml:"LogConfig"`
 }
 
 type LogConfig struct {
@@ -46,6 +56,32 @@ type LogConfig struct {
 func Initialize(appName string, cfgPath string) {
 	Config.Initialize(&cfgPath)
 	LogIt = SetupLogging(Config.Logcfg, appName)
+	loadCredentials(Config.EnvFile)
+}
+
+// loadCredentials liest AdminUser/AdminPassword/APIToken aus der in
+// ApplicationConfig.EnvFile referenzierten .env-Datei. Fehlt die Datei oder
+// einzelne Werte, bleiben die bereits gesetzten Defaults bestehen - Zugangsdaten
+// gehören bewusst nicht in die YAML-Config.
+func loadCredentials(envFile string) {
+	if envFile == "" {
+		LogIt.Info("keine envFile konfiguriert, verwende Default-Admin-Zugangsdaten und deaktiviertes API")
+		return
+	}
+	values, err := helpers.ParseEnvFile(envFile)
+	if err != nil {
+		LogIt.Warn("konnte envFile nicht lesen, verwende Defaults: " + err.Error())
+		return
+	}
+	if v, ok := values["ADMIN_USER"]; ok && v != "" {
+		AdminUser = v
+	}
+	if v, ok := values["ADMIN_PASSWORD"]; ok && v != "" {
+		AdminPassword = v
+	}
+	if v, ok := values["API_TOKEN"]; ok && v != "" {
+		APIToken = v
+	}
 }
 
 func (Config *ApplicationConfig) Initialize(ConfigPath *string) {
@@ -67,18 +103,16 @@ func (Config *ApplicationConfig) Initialize(ConfigPath *string) {
 
 func (config *ApplicationConfig) setDefaults() {
 	*config = ApplicationConfig{
-		DbPath:         "./fairdb.db",
-		ListPath:       "./",
-		BackupPath:     "./backup/",
-		OutputPath:     "./output/",
-		WebfilesPath:   "./html/",
-		BasePath:       "",
-		WebPort:        8080,
-		TrustedProxies: []string{"127.0.0.1"},
-		DateLayout:   "02/Jan/2006:15:04:05 -0700",
-		OutputFolder: "./output/",
-		LogType:      "apache",
-		LogFormat:    "%h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\"",
+		DbPath:              "./fairdb.db",
+		WhitelistPath:       "./whitelists/",
+		BlocklistPath:       "./blocklists/",
+		BackupPath:          "./backup/",
+		WebfilesPath:        "./html/",
+		BasePath:            "",
+		WebPort:             8080,
+		TrustedProxies:      []string{"127.0.0.1"},
+		EnvFile:             "",
+		ApacheReloadCommand: []string{"sudo", "systemctl", "reload", "apache2"},
 		Logcfg: LogConfig{
 			LogLevel:  "INFO",
 			LogFolder: "./logs/",
@@ -86,20 +120,21 @@ func (config *ApplicationConfig) setDefaults() {
 	}
 }
 
+// CheckConfig normalisiert Pfade und stellt sicher, dass alle vom Programm
+// tatsächlich genutzten Verzeichnisse existieren. Läuft beim normalen Start
+// unbeaufsichtigt (z. B. als systemd-Service), daher wird hier bewusst nicht
+// interaktiv nachgefragt, sondern direkt angelegt.
 func (c *ApplicationConfig) CheckConfig() {
-	// TODO: hier könnte noch ein DateLayoutCheck rein
 	helpers.Checknaddtrailingslash(&c.Logcfg.LogFolder)
+	helpers.Checknaddtrailingslash(&c.WhitelistPath)
+	helpers.Checknaddtrailingslash(&c.BlocklistPath)
 	helpers.Checknaddtrailingslash(&c.BackupPath)
-	helpers.Checknaddtrailingslash(&c.OutputPath)
-	helpers.Checknaddtrailingslash(&c.ListPath)
-	// check if the log folder exists
-	if !helpers.CheckIfDir(c.Logcfg.LogFolder) {
-		helpers.ToBeCreated(c.Logcfg.LogFolder)
-	}
-	helpers.Checknaddtrailingslash(&c.OutputFolder)
-	// check if the output folder exists
-	if !helpers.CheckIfDir(c.OutputFolder) {
-		helpers.ToBeCreated(c.OutputFolder)
+
+	dirs := []string{c.Logcfg.LogFolder, c.WhitelistPath, c.BlocklistPath, c.BackupPath}
+	for _, dir := range dirs {
+		if err := helpers.EnsureDir(dir); err != nil {
+			fmt.Println("Konnte Verzeichnis nicht anlegen: " + dir + ": " + err.Error())
+		}
 	}
 }
 

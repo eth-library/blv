@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>{{ .title }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="{{ $.BasePath }}/static/styles.css">
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>{{ .title }}</h1>
+    </div>
+  </header>
+      <ul class="menu container">
+        <li><a href="{{ $.BasePath }}/" class="link-back">Zurück zur Startseite</a></li>
+        <li><a href="{{ $.BasePath }}/admin" class="link-back">Zur Administration</a></li>
+      </ul>
+
+  <main>
+    <div class="container">
+
+      <section class="status">
+        {{ if .message }}
+          <div class="alert alert-success">{{ .message }}</div>
+        {{ end }}
+        {{ range .errors }}
+          <div class="alert alert-error">{{ . }}</div>
+        {{ end }}
+      </section>
+
+      <section class="card">
+        <h2>Whitelist-Dateien</h2>
+        <p class="hint">{{ .whitelistPath }}</p>
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Datei</th>
+                <th scope="col">Zuletzt geändert</th>
+              </tr>
+            </thead>
+            <tbody>
+            {{ range .whitelistFiles }}
+              <tr>
+                <td>{{ .Name }}</td>
+                <td>{{ .ModTime }}</td>
+              </tr>
+            {{ else }}
+              <tr>
+                <td colspan="2" class="table-empty">Keine Dateien vorhanden.</td>
+              </tr>
+            {{ end }}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Blocklist-Dateien</h2>
+        <p class="hint">{{ .blocklistPath }}</p>
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Datei</th>
+                <th scope="col">Zuletzt geändert</th>
+              </tr>
+            </thead>
+            <tbody>
+            {{ range .blocklistFiles }}
+              <tr>
+                <td>{{ .Name }}</td>
+                <td>{{ .ModTime }}</td>
+              </tr>
+            {{ else }}
+              <tr>
+                <td colspan="2" class="table-empty">Keine Dateien vorhanden.</td>
+              </tr>
+            {{ end }}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <form method="post" action="{{ $.BasePath }}/admin/activate" onsubmit="return confirm('Das exportiert die komplette DB in die obigen Verzeichnisse und lädt Apache automatisch neu. Sicher?');">
+          <button type="submit" class="btn">Konfiguration aktivieren (Export + Apache-Reload)</button>
+        </form>
+      </section>
+
+    </div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>{{ .title }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="{{ $.BasePath }}/static/styles.css">
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>{{ .title }}</h1>
+    </div>
+  </header>
+      <ul class="menu container">
+        <li><a href="{{ $.BasePath }}/" class="link-back">Zurück zur Startseite</a></li>
+        <li><a href="{{ $.BasePath }}/admin/groups" class="link-back">Zurück zur Gruppenübersicht</a></li>
+      </ul>
+
+  <main>
+    <div class="container">
+
+      {{ if .error }}
+      <section class="status">
+        <div class="alert alert-error"><p>{{ .error }}</p></div>
+      </section>
+      {{ end }}
+      {{ if .message }}
+        <div class="alert alert-success">{{ .message }}</div>
+      {{ end }}
+
+      <section class="card">
+        <p>Status:
+          {{ if eq .groupStatus "w" }} whitelisted
+          {{ else if eq .groupStatus "b" }} blocked
+          {{ else }} inaktiv
+          {{ end }}
+        </p>
+      </section>
+
+      <section class="card menu">
+        <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/activate">
+          <button type="submit" class="btn-grey">Gruppe aktivieren (Export + Apache-Reload)</button>
+        </form>
+        {{ if ne .groupStatus "w" }}
+          <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/whitelist" onsubmit="return confirm('Das whitelisted die gesamte Gruppe und lädt Apache neu! Sicher?');">
+            <button type="submit" class="btn-green">Gruppe whitelisten</button>
+          </form>
+        {{ end }}
+        {{ if ne .groupStatus "b" }}
+          <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/block" onsubmit="return confirm('Das blockt die gesamte Gruppe und lädt Apache neu! Sicher?');">
+            <button type="submit" class="btn-block">Gruppe blocken</button>
+          </form>
+        {{ end }}
+        <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/delete" onsubmit="return confirm('Das löscht die Gruppe (Pools bleiben, werden aber ungruppiert)! Sicher?');">
+          <button type="submit" class="btn-danger">Gruppe löschen</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h3>Pools in dieser Gruppe</h3>
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th scope="col">Pool</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+            {{ range .pools }}
+              <tr>
+                <td><a href="{{ $.BasePath }}/admin/pools/{{ .Name }}">{{ .Name }}</a></td>
+                <td>
+                  {{ if eq .Status "w" }} whitelisted
+                  {{ else if eq .Status "b" }} blocked
+                  {{ else }} gemischt/inaktiv
+                  {{ end }}
+                </td>
+              </tr>
+            {{ else }}
+              <tr>
+                <td colspan="2" class="table-empty">Keine Pools in dieser Gruppe.</td>
+              </tr>
+            {{ end }}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>Pool dieser Gruppe zuweisen</h3>
+        <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/assignPool" novalidate>
+          <div class="field-group">
+            <label for="poolName">Poolname</label>
+            <input type="text" id="poolName" name="poolName" placeholder="vorhandener Poolname">
+          </div>
+          <button type="submit">Zuweisen</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h3>Datei in diese Gruppe hochladen</h3>
+        <p class="hint">Legt aus der Datei einen neuen Pool an (Poolname = Dateiname) und weist ihn direkt dieser Gruppe zu. Unterstützte Formate:
+          <ul>
+            <li>Apache Konfigurationsdatei mit require [not] IP-Einträgen (.conf)</li>
+            <li>einfache IP-Listen (.txt)</li>
+          </ul>
+        </p>
+        <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/uploadPool" enctype="multipart/form-data">
+          <div class="field-group">
+            <label for="file">Datei auswählen</label>
+            <input type="file" id="file" name="file" accept=".conf, .txt">
+          </div>
+          <button type="submit">Hochladen</button>
+        </form>
+      </section>
+
+    </div>
+  </main>
+</body>
+</html>

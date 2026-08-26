@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>{{ .title }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="{{ $.BasePath }}/static/styles.css">
+</head>
+<body>
+  <header>
+    <div class="container">
+      <h1>{{ .title }}</h1>
+    </div>
+  </header>
+      <ul class="menu container">
+        <li><a href="{{ $.BasePath }}/" class="link-back">Zurück zur Startseite</a></li>
+        <li><a href="{{ $.BasePath }}/pools" class="link-back">Zur Poolübersicht</a></li>
+        <li><a href="{{ $.BasePath }}/admin" class="link-back">Zur Administration</a></li>
+      </ul>
+
+  <main>
+    <div class="container">
+
+      <section class="status">
+        {{ if .error }}
+        <div class="alert alert-error">{{ .error }}</div>
+        {{ end }}
+        {{ if .message }}
+        <div class="alert alert-info">{{ .message }}</div>
+        {{ end }}
+      </section>
+
+      <section class="card">
+        <h2>Verfügbare Gruppen</h2>
+
+        <ul class="data-list">
+            {{ range .groups }}
+                <li><a href="{{ $.BasePath }}/admin/groups/{{ .Name }}" class="link-item">{{ .Name }}</a>
+                  {{ if eq .Status "w" }} (whitelisted)
+                  {{ else if eq .Status "b" }} (blocked)
+                  {{ else }} (inaktiv)
+                  {{ end }}
+                </li>
+            {{ else }}
+                <li>Keine Einträge vorhanden.</li>
+            {{ end }}
+        </ul>
+      </section>
+
+      <section class="card">
+        <h3>Neue Gruppe anlegen</h3>
+        <form method="post" action="{{ $.BasePath }}/admin/groups" novalidate>
+          <div class="field-group">
+            <label for="name">Gruppenname</label>
+            <input type="text" id="name" name="name" placeholder="z. B. Scraping-Netz">
+          </div>
+          <button type="submit">Anlegen</button>
+        </form>
+      </section>
+</div>
+
+    </div>
+  </main>
+</body>
+</html>

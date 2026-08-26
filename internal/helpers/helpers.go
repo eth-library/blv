@@ -2,7 +2,6 @@ package helpers
 
 import (
 	"flag"
-	"slices"
 )
 
 // ===============
@@ -17,10 +16,6 @@ func FlagIsPassed(name string) bool {
 		}
 	})
 	return found
-}
-
-func StringInSlice(name string, sl []string) bool {
-	return slices.Contains(sl, name)
 }
 
 func GetStringSliceElementIndex(slice []string, value string) int {

@@ -17,7 +17,6 @@ var (
 	_, ApplicationName = helpers.SeparateFileFromPath(os.Args[0])
 	ConfigPath         = flag.String("c", "/etc/fairdb/conf.d/fairdb.yml", "use -c to provide a custom path to the config file")
 	DBinit             = flag.Bool("init", false, "Neuaufbau der Datenbank erzwingen")
-	Reset              = flag.Bool("reset", false, "Neuaufbau der Datenbank erzwingen")
 )
 
 func main() {
@@ -31,8 +30,8 @@ func main() {
 	app.LogIt.Info(ApplicationName + " starting")
 	app.LogIt.Debug("folgende Werte wurden gesetzt")
 	app.LogIt.Debug("DbPath:         " + app.Config.DbPath)
-	app.LogIt.Debug("ListPath:  " + app.Config.ListPath)
-	app.LogIt.Debug("OutputPath:     " + app.Config.OutputPath)
+	app.LogIt.Debug("WhitelistPath:  " + app.Config.WhitelistPath)
+	app.LogIt.Debug("BlocklistPath:  " + app.Config.BlocklistPath)
 	app.LogIt.Debug("BackupPath:     " + app.Config.BackupPath)
 	app.LogIt.Debug("WebfilesPath:   " + app.Config.WebfilesPath)
 	app.LogIt.Debug("BasePath:       " + app.Config.BasePath)
@@ -63,19 +62,20 @@ func main() {
 		}
 		defer database.Close()
 
-		if *Reset {
-			app.LogIt.Info("Die DB wird nun zurückgesetzt und die Apache-Listen neu geladen - was kann etwas dauern.")
-			fmt.Println("Die DB wird nun zurückgesetzt und die Apache-Listen neu geladen - was kann etwas dauern.")
-			functions.ResetDB(database)
-			app.LogIt.Info("Die DB wurde zurückgesetzt und die Apache-Listen neu geladen.")
-			fmt.Println("Die DB wurde zurückgesetzt und die Apache-Listen neu geladen.")
-		} else {
-			r := webserver.NewRouter(database, app.Config.BasePath)
-			addr := fmt.Sprintf(":%d", app.Config.WebPort)
-			log.Printf("Starte Webserver auf %s ...", addr)
-			if err := r.Run(addr); err != nil {
-				log.Fatalf("Fehler beim Starten des Servers: %v", err)
-			}
+		// Schema idempotent auf dem neuesten Stand halten (z. B. group_name/
+		// groups aus einer älteren DB nachziehen), ohne die Daten anzutasten.
+		// CreateTables nutzt CREATE TABLE IF NOT EXISTS bzw. prüft fehlende
+		// Spalten vor einem ALTER TABLE, ist also auch bei jedem normalen
+		// Start gefahrlos aufrufbar.
+		if err := db.CreateTables(database); err != nil {
+			log.Fatalf("Fehler bei der Schema-Migration: %v", err)
+		}
+
+		r := webserver.NewRouter(database, app.Config.BasePath)
+		addr := fmt.Sprintf(":%d", app.Config.WebPort)
+		log.Printf("Starte Webserver auf %s ...", addr)
+		if err := r.Run(addr); err != nil {
+			log.Fatalf("Fehler beim Starten des Servers: %v", err)
 		}
 	}
 }

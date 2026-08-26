@@ -11,3 +11,6 @@ blocklists
 whitelists
 ip-listen
 blv Kopie.db
+fairdb
+fairdb.db*
+*.tgz
