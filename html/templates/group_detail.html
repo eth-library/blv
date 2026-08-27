@@ -18,7 +18,7 @@
       </ul>
 
   <main>
-    <div class="container">
+    <div class="container container-wide">
 
       {{ if .error }}
       <section class="status">
@@ -29,177 +29,186 @@
         <div class="alert alert-success">{{ .message }}</div>
       {{ end }}
 
-      <section class="card">
-        <p>Status:
-          {{ if eq .groupStatus "w" }} whitelisted
-          {{ else if eq .groupStatus "b" }} blocked
-          {{ else }} inaktiv
-          {{ end }}
-        </p>
-      </section>
+      <div class="grid">
+        <div class="grid-left">
 
-      <section class="card menu">
-        <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/activate">
-          <button type="submit" class="btn-grey">Gruppe aktivieren (Export + Apache-Reload)</button>
-        </form>
-        {{ if ne .groupStatus "w" }}
-          <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/whitelist" onsubmit="return confirm('Das whitelisted die gesamte Gruppe und lädt Apache neu! Sicher?');">
-            <button type="submit" class="btn-green">Gruppe whitelisten</button>
-          </form>
-        {{ end }}
-        {{ if ne .groupStatus "b" }}
-          <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/block" onsubmit="return confirm('Das blockt die gesamte Gruppe und lädt Apache neu! Sicher?');">
-            <button type="submit" class="btn-block">Gruppe blocken</button>
-          </form>
-        {{ end }}
-        <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/delete" onsubmit="return confirm('Das löscht die Gruppe (Pools bleiben, werden aber ungruppiert)! Sicher?');">
-          <button type="submit" class="btn-danger">Gruppe löschen</button>
-        </form>
-      </section>
-
-      <section class="card">
-        <h3>Pools in dieser Gruppe</h3>
-        <div class="table-wrapper">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th scope="col">Pool</th>
-                <th scope="col">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-            {{ range .pools }}
-              <tr>
-                <td><a href="{{ $.BasePath }}/admin/pools/{{ .Name }}">{{ .Name }}</a></td>
-                <td>
-                  {{ if eq .Status "w" }} whitelisted
-                  {{ else if eq .Status "b" }} blocked
-                  {{ else }} gemischt/inaktiv
+          {{ if .autoBlockAvailable }}
+          <section class="card">
+            <h3>Automatischer Block (Scraping-Schutz)</h3>
+            <p class="hint">
+              Blockt diese Gruppe automatisch temporär, wenn der gemessene
+              serverweite Ø-Requests/s über einen längeren Zeitraum den Schwellwert
+              überschreitet (mit Zufallsanteil, siehe README).
+            </p>
+            {{ with .autoBlockMonitor }}
+              <p>
+                Aktuelle Messung: Ø {{ printf "%.2f" .AvgRPS }} req/s
+                {{ if .Healthy }}
+                  (verlässlich)
+                {{ else if not .Reachable }}
+                  (server-status nicht erreichbar - siehe Log)
+                {{ else }}
+                  (Datenbasis wird aufgebaut: {{ printf "%.1f" .WindowCoverage.Minutes }} von {{ $.autoBlockWindowMinutes }} Minuten erfasst)
+                {{ end }}
+              </p>
+            {{ end }}
+            {{ with .autoBlockSettings }}
+              {{ if .Enabled }}
+                <p>
+                  AutoBlock ist <strong>aktiviert</strong> (Schwellwert {{ printf "%.0f" .ThresholdRPS }} req/s,
+                  Blockdauer {{ $.autoBlockMinMinutes }}-{{ $.autoBlockMaxMinutes }} Minuten).
+                  {{ if .Active }}
+                    Aktuell automatisch geblockt{{ if .TriggeredUntil }} bis {{ .TriggeredUntil.Format "2006-01-02 15:04:05" }}{{ end }}.
                   {{ end }}
-                </td>
-              </tr>
-            {{ else }}
-              <tr>
-                <td colspan="2" class="table-empty">Keine Pools in dieser Gruppe.</td>
-              </tr>
+                </p>
+              {{ end }}
             {{ end }}
-            </tbody>
-          </table>
+            {{ if .autoBlockLockedBy }}
+              <div class="alert alert-error">
+                AutoBlock ist bereits für Gruppe
+                <a href="{{ $.BasePath }}/admin/groups/{{ .autoBlockLockedBy }}">{{ .autoBlockLockedBy }}</a>
+                aktiviert - es darf immer nur eine Gruppe gleichzeitig aktiv sein.
+                Erst dort deaktivieren, um AutoBlock hier zu aktivieren.
+              </div>
+            {{ end }}
+            <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/autoblock">
+              <fieldset {{ if .autoBlockLockedBy }}disabled{{ end }}>
+              <div class="field-group">
+                <label for="abEnabled">
+                  <input type="checkbox" id="abEnabled" name="enabled" value="1" {{ if .autoBlockSettings }}{{ if .autoBlockSettings.Enabled }}checked{{ end }}{{ end }}>
+                  aktiviert
+                </label>
+              </div>
+              <div class="field-group">
+                <label for="abThreshold">Schwellwert (Ø req/s)</label>
+                <input type="number" step="1" min="1" id="abThreshold" name="thresholdRPS" value="{{ if .autoBlockSettings }}{{ printf "%.0f" .autoBlockSettings.ThresholdRPS }}{{ end }}" oninput="fairdbUpdateAutoBlockRange()">
+                <span class="hint" id="abThresholdRange"></span>
+              </div>
+              <div class="field-group">
+                <label for="abMin">Blockdauer min (Minuten)</label>
+                <input type="number" min="1" id="abMin" name="blockDurationMinMinutes" value="{{ if .autoBlockSettings }}{{ .autoBlockMinMinutes }}{{ end }}">
+              </div>
+              <div class="field-group">
+                <label for="abMax">Blockdauer max (Minuten)</label>
+                <input type="number" min="1" id="abMax" name="blockDurationMaxMinutes" value="{{ if .autoBlockSettings }}{{ .autoBlockMaxMinutes }}{{ end }}">
+              </div>
+              <button type="submit">Speichern</button>
+              </fieldset>
+            </form>
+            <script>
+              (function () {
+                var variancePercent = {{ .autoBlockVariancePercent }};
+                window.fairdbUpdateAutoBlockRange = function () {
+                  var input = document.getElementById('abThreshold');
+                  var out = document.getElementById('abThresholdRange');
+                  var value = parseFloat(input.value);
+                  if (!isFinite(value) || value <= 0) {
+                    out.textContent = '';
+                    return;
+                  }
+                  var factor = variancePercent / 100;
+                  var low = value * (1 - factor);
+                  var high = value * (1 + factor);
+                  out.textContent = 'pendelt bei jeder Prüfung zwischen ' + low.toFixed(0) + ' und ' + high.toFixed(0) + ' req/s (±' + variancePercent + '%)';
+                };
+                fairdbUpdateAutoBlockRange();
+              })();
+            </script>
+          </section>
+          {{ end }}
+
+          <section class="card">
+            <h3>Pool dieser Gruppe zuweisen</h3>
+            <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/assignPool" novalidate>
+              <div class="field-group">
+                <label for="poolName">Poolname</label>
+                <input type="text" id="poolName" name="poolName" placeholder="vorhandener Poolname">
+              </div>
+              <button type="submit">Zuweisen</button>
+            </form>
+          </section>
+
+          <section class="card">
+            <h3>Datei in diese Gruppe hochladen</h3>
+            <p class="hint">Legt aus der Datei einen neuen Pool an (Poolname = Dateiname) und weist ihn direkt dieser Gruppe zu. Unterstützte Formate:
+              <ul>
+                <li>Apache Konfigurationsdatei mit require [not] IP-Einträgen (.conf)</li>
+                <li>einfache IP-Listen (.txt)</li>
+              </ul>
+            </p>
+            <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/uploadPool" enctype="multipart/form-data">
+              <div class="field-group">
+                <label for="file">Datei auswählen</label>
+                <input type="file" id="file" name="file" accept=".conf, .txt">
+              </div>
+              <button type="submit">Hochladen</button>
+            </form>
+          </section>
+
         </div>
-      </section>
+        <div class="grid-right">
 
-      <section class="card">
-        <h3>Pool dieser Gruppe zuweisen</h3>
-        <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/assignPool" novalidate>
-          <div class="field-group">
-            <label for="poolName">Poolname</label>
-            <input type="text" id="poolName" name="poolName" placeholder="vorhandener Poolname">
-          </div>
-          <button type="submit">Zuweisen</button>
-        </form>
-      </section>
-
-      {{ if .autoBlockAvailable }}
-      <section class="card">
-        <h3>Automatischer Block (Scraping-Schutz)</h3>
-        <p class="hint">
-          Blockt diese Gruppe automatisch temporär, wenn der gemessene
-          serverweite Ø-Requests/s über einen längeren Zeitraum den Schwellwert
-          überschreitet (mit Zufallsanteil, siehe README).
-        </p>
-        {{ with .autoBlockMonitor }}
-          <p>
-            Aktuelle Messung: Ø {{ printf "%.2f" .AvgRPS }} req/s
-            {{ if .Healthy }}
-              (verlässlich)
-            {{ else if not .Reachable }}
-              (server-status nicht erreichbar - siehe Log)
-            {{ else }}
-              (Datenbasis wird aufgebaut: {{ printf "%.1f" .WindowCoverage.Minutes }} von {{ $.autoBlockWindowMinutes }} Minuten erfasst)
-            {{ end }}
-          </p>
-        {{ end }}
-        {{ with .autoBlockSettings }}
-          {{ if .Enabled }}
-            <p>
-              AutoBlock ist <strong>aktiviert</strong> (Schwellwert {{ printf "%.2f" .ThresholdRPS }} req/s,
-              Blockdauer {{ .BlockDurationMinSeconds }}-{{ .BlockDurationMaxSeconds }}s).
-              {{ if .Active }}
-                Aktuell automatisch geblockt{{ if .TriggeredUntil }} bis {{ .TriggeredUntil.Format "2006-01-02 15:04:05" }}{{ end }}.
+          <section class="card status-row">
+            <p>Status:
+              {{ if eq .groupStatus "w" }} whitelisted
+              {{ else if eq .groupStatus "b" }} blocked
+              {{ else }} inaktiv
               {{ end }}
             </p>
-          {{ end }}
-        {{ end }}
-        {{ if .autoBlockLockedBy }}
-          <div class="alert alert-error">
-            AutoBlock ist bereits für Gruppe
-            <a href="{{ $.BasePath }}/admin/groups/{{ .autoBlockLockedBy }}">{{ .autoBlockLockedBy }}</a>
-            aktiviert - es darf immer nur eine Gruppe gleichzeitig aktiv sein.
-            Erst dort deaktivieren, um AutoBlock hier zu aktivieren.
-          </div>
-        {{ end }}
-        <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/autoblock">
-          <fieldset {{ if .autoBlockLockedBy }}disabled{{ end }}>
-          <div class="field-group">
-            <label for="abEnabled">
-              <input type="checkbox" id="abEnabled" name="enabled" value="1" {{ if .autoBlockSettings }}{{ if .autoBlockSettings.Enabled }}checked{{ end }}{{ end }}>
-              aktiviert
-            </label>
-          </div>
-          <div class="field-group">
-            <label for="abThreshold">Schwellwert (Ø req/s)</label>
-            <input type="number" step="0.01" min="0.01" id="abThreshold" name="thresholdRPS" value="{{ if .autoBlockSettings }}{{ .autoBlockSettings.ThresholdRPS }}{{ end }}" oninput="fairdbUpdateAutoBlockRange()">
-            <span class="hint" id="abThresholdRange"></span>
-          </div>
-          <div class="field-group">
-            <label for="abMin">Blockdauer min (s)</label>
-            <input type="number" min="1" id="abMin" name="blockDurationMinSeconds" value="{{ if .autoBlockSettings }}{{ .autoBlockSettings.BlockDurationMinSeconds }}{{ end }}">
-          </div>
-          <div class="field-group">
-            <label for="abMax">Blockdauer max (s)</label>
-            <input type="number" min="1" id="abMax" name="blockDurationMaxSeconds" value="{{ if .autoBlockSettings }}{{ .autoBlockSettings.BlockDurationMaxSeconds }}{{ end }}">
-          </div>
-          <button type="submit">Speichern</button>
-          </fieldset>
-        </form>
-        <script>
-          (function () {
-            var variancePercent = {{ .autoBlockVariancePercent }};
-            window.fairdbUpdateAutoBlockRange = function () {
-              var input = document.getElementById('abThreshold');
-              var out = document.getElementById('abThresholdRange');
-              var value = parseFloat(input.value);
-              if (!isFinite(value) || value <= 0) {
-                out.textContent = '';
-                return;
-              }
-              var factor = variancePercent / 100;
-              var low = value * (1 - factor);
-              var high = value * (1 + factor);
-              out.textContent = 'pendelt bei jeder Prüfung zwischen ' + low.toFixed(2) + ' und ' + high.toFixed(2) + ' req/s (±' + variancePercent + '%)';
-            };
-            fairdbUpdateAutoBlockRange();
-          })();
-        </script>
-      </section>
-      {{ end }}
+            <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/activate">
+              <button type="submit" class="btn-grey">Gruppe aktivieren (Export + Apache-Reload)</button>
+            </form>
+          </section>
 
-      <section class="card">
-        <h3>Datei in diese Gruppe hochladen</h3>
-        <p class="hint">Legt aus der Datei einen neuen Pool an (Poolname = Dateiname) und weist ihn direkt dieser Gruppe zu. Unterstützte Formate:
-          <ul>
-            <li>Apache Konfigurationsdatei mit require [not] IP-Einträgen (.conf)</li>
-            <li>einfache IP-Listen (.txt)</li>
-          </ul>
-        </p>
-        <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/uploadPool" enctype="multipart/form-data">
-          <div class="field-group">
-            <label for="file">Datei auswählen</label>
-            <input type="file" id="file" name="file" accept=".conf, .txt">
-          </div>
-          <button type="submit">Hochladen</button>
-        </form>
-      </section>
+          <section class="card menu">
+            {{ if ne .groupStatus "w" }}
+              <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/whitelist" onsubmit="return confirm('Das whitelisted die gesamte Gruppe und lädt Apache neu! Sicher?');">
+                <button type="submit" class="btn-green">Gruppe whitelisten</button>
+              </form>
+            {{ end }}
+            {{ if ne .groupStatus "b" }}
+              <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/block" onsubmit="return confirm('Das blockt die gesamte Gruppe und lädt Apache neu! Sicher?');">
+                <button type="submit" class="btn-block">Gruppe blocken</button>
+              </form>
+            {{ end }}
+            <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/delete" onsubmit="return confirm('Das löscht die Gruppe (Pools bleiben, werden aber ungruppiert)! Sicher?');">
+              <button type="submit" class="btn-danger">Gruppe löschen</button>
+            </form>
+          </section>
+
+          <section class="card">
+            <h3>Pools in dieser Gruppe</h3>
+            <div class="table-wrapper">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Pool</th>
+                    <th scope="col">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                {{ range .pools }}
+                  <tr>
+                    <td><a href="{{ $.BasePath }}/admin/pools/{{ .Name }}">{{ .Name }}</a></td>
+                    <td>
+                      {{ if eq .Status "w" }} whitelisted
+                      {{ else if eq .Status "b" }} blocked
+                      {{ else }} gemischt/inaktiv
+                      {{ end }}
+                    </td>
+                  </tr>
+                {{ else }}
+                  <tr>
+                    <td colspan="2" class="table-empty">Keine Pools in dieser Gruppe.</td>
+                  </tr>
+                {{ end }}
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+        </div>
+      </div>
 
     </div>
   </main>

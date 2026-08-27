@@ -84,6 +84,20 @@ func addAutoBlockContext(ctx gin.H, database *sql.DB, autoBlockManager *autobloc
 		return
 	}
 	ctx["autoBlockSettings"] = settings
+	// Blockdauer wird intern (DB, Manager, randomDuration) durchgängig in
+	// Sekunden gehalten - im WebUI aber für Menschen in Minuten angezeigt/
+	// eingegeben (siehe autoblock-Handler, der beim Speichern zurück in
+	// Sekunden umrechnet). Rundung hier ist bewusst unkritisch: die Werte
+	// werden ohnehin immer in vollen Minuten neu eingegeben. Immer (auch ohne
+	// gespeicherte Settings) setzen, damit das Template nicht auf einen
+	// fehlenden Map-Key trifft (rendert sonst als "<no value>").
+	minMinutes, maxMinutes := 0, 0
+	if settings != nil {
+		minMinutes = settings.BlockDurationMinSeconds / 60
+		maxMinutes = settings.BlockDurationMaxSeconds / 60
+	}
+	ctx["autoBlockMinMinutes"] = minMinutes
+	ctx["autoBlockMaxMinutes"] = maxMinutes
 
 	// Es darf immer nur eine Gruppe gleichzeitig AutoBlock aktiviert haben
 	// (siehe Manager.Enable) - für jede andere Gruppe wird die Aktivierung im
@@ -453,9 +467,13 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 		}
 		enabled := c.PostForm("enabled") != ""
 		thresholdRPS, errT := strconv.ParseFloat(strings.TrimSpace(c.PostForm("thresholdRPS")), 64)
-		minSeconds, errMin := strconv.Atoi(strings.TrimSpace(c.PostForm("blockDurationMinSeconds")))
-		maxSeconds, errMax := strconv.Atoi(strings.TrimSpace(c.PostForm("blockDurationMaxSeconds")))
-		valid := errT == nil && errMin == nil && errMax == nil && thresholdRPS > 0 && minSeconds > 0 && maxSeconds >= minSeconds
+		minMinutes, errMin := strconv.Atoi(strings.TrimSpace(c.PostForm("blockDurationMinMinutes")))
+		maxMinutes, errMax := strconv.Atoi(strings.TrimSpace(c.PostForm("blockDurationMaxMinutes")))
+		// Formular/Anzeige arbeiten in Minuten, DB/Manager/randomDuration
+		// intern durchgängig in Sekunden (siehe addAutoBlockContext) - hier an
+		// der Formulargrenze umgerechnet.
+		minSeconds, maxSeconds := minMinutes*60, maxMinutes*60
+		valid := errT == nil && errMin == nil && errMax == nil && thresholdRPS > 0 && minMinutes > 0 && maxMinutes >= minMinutes
 
 		if !valid {
 			if enabled {

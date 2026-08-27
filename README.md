@@ -255,9 +255,11 @@ einem Zähler-Reset von Apache dauert es bis zu `measureWindowMinutes` Minuten,
 bis genug Daten für einen verlässlichen Durchschnitt vorliegen).
 
 **Pro Gruppe** (Gruppen-Detailseite im Admin-Bereich): AutoBlock aktivieren
-mit Schwellwert (Ø req/s, wird bei jeder Prüfung zusätzlich um
-`thresholdVariancePercent` verzerrt) und einer Blockdauer-Spanne (min/max in
-Sekunden, bei Auslösung wird eine zufällige Dauer daraus gewählt).
+mit Schwellwert (Ø req/s, ganzzahlig eingegeben, wird bei jeder Prüfung
+zusätzlich um `thresholdVariancePercent` verzerrt) und einer Blockdauer-Spanne
+(min/max in Minuten, bei Auslösung wird eine zufällige Dauer daraus gewählt).
+Intern (DB, Auswertung) wird die Blockdauer weiterhin in Sekunden gehalten -
+die Umrechnung erfolgt ausschließlich an der WebUI-Formulargrenze.
 
 Da die Ratenmessung serverweit ist und nicht zwischen Gruppen unterscheidet,
 darf **immer nur eine einzige Gruppe gleichzeitig** AutoBlock aktiviert
