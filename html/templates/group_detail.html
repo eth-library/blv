@@ -99,6 +99,65 @@
         </form>
       </section>
 
+      {{ if .autoBlockAvailable }}
+      <section class="card">
+        <h3>Automatischer Block (Scraping-Schutz)</h3>
+        <p class="hint">
+          Blockt diese Gruppe automatisch temporär, wenn der gemessene
+          serverweite Ø-Requests/s über einen längeren Zeitraum den Schwellwert
+          überschreitet (mit Zufallsanteil, siehe README).
+        </p>
+        {{ with .autoBlockMonitor }}
+          <p>
+            Aktuelle Messung: Ø {{ printf "%.2f" .AvgRPS }} req/s
+            {{ if .Healthy }} (verlässlich){{ else }} (noch nicht verlässlich / server-status nicht erreichbar){{ end }}
+          </p>
+        {{ end }}
+        {{ with .autoBlockSettings }}
+          {{ if .Enabled }}
+            <p>
+              AutoBlock ist <strong>aktiviert</strong> (Schwellwert {{ printf "%.2f" .ThresholdRPS }} req/s,
+              Blockdauer {{ .BlockDurationMinSeconds }}-{{ .BlockDurationMaxSeconds }}s).
+              {{ if .Active }}
+                Aktuell automatisch geblockt{{ if .TriggeredUntil }} bis {{ .TriggeredUntil.Format "2006-01-02 15:04:05" }}{{ end }}.
+              {{ end }}
+            </p>
+          {{ end }}
+        {{ end }}
+        {{ if .autoBlockLockedBy }}
+          <div class="alert alert-error">
+            AutoBlock ist bereits für Gruppe
+            <a href="{{ $.BasePath }}/admin/groups/{{ .autoBlockLockedBy }}">{{ .autoBlockLockedBy }}</a>
+            aktiviert - es darf immer nur eine Gruppe gleichzeitig aktiv sein.
+            Erst dort deaktivieren, um AutoBlock hier zu aktivieren.
+          </div>
+        {{ end }}
+        <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/autoblock">
+          <fieldset {{ if .autoBlockLockedBy }}disabled{{ end }}>
+          <div class="field-group">
+            <label for="abEnabled">
+              <input type="checkbox" id="abEnabled" name="enabled" value="1" {{ if .autoBlockSettings }}{{ if .autoBlockSettings.Enabled }}checked{{ end }}{{ end }}>
+              aktiviert
+            </label>
+          </div>
+          <div class="field-group">
+            <label for="abThreshold">Schwellwert (Ø req/s)</label>
+            <input type="number" step="0.01" min="0.01" id="abThreshold" name="thresholdRPS" value="{{ if .autoBlockSettings }}{{ .autoBlockSettings.ThresholdRPS }}{{ end }}">
+          </div>
+          <div class="field-group">
+            <label for="abMin">Blockdauer min (s)</label>
+            <input type="number" min="1" id="abMin" name="blockDurationMinSeconds" value="{{ if .autoBlockSettings }}{{ .autoBlockSettings.BlockDurationMinSeconds }}{{ end }}">
+          </div>
+          <div class="field-group">
+            <label for="abMax">Blockdauer max (s)</label>
+            <input type="number" min="1" id="abMax" name="blockDurationMaxSeconds" value="{{ if .autoBlockSettings }}{{ .autoBlockSettings.BlockDurationMaxSeconds }}{{ end }}">
+          </div>
+          <button type="submit">Speichern</button>
+          </fieldset>
+        </form>
+      </section>
+      {{ end }}
+
       <section class="card">
         <h3>Datei in diese Gruppe hochladen</h3>
         <p class="hint">Legt aus der Datei einen neuen Pool an (Poolname = Dateiname) und weist ihn direkt dieser Gruppe zu. Unterstützte Formate:

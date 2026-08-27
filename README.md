@@ -204,6 +204,66 @@ done
 Optional lässt sich mit `-F "zielStatus=b"` bzw. `-F "zielStatus=w"` der
 Status jedes importierten Eintrags direkt mitgeben.
 
+## AutoBlock (automatischer Scraping-Schutz)
+fairDB sitzt nicht im Request-Pfad (es erzeugt nur `Require [not] ip`-
+Direktiven, die Apache selbst auswertet) und hat daher keine eigene Sicht auf
+tatsächliche Requests. Als Datenquelle pollt fairDB stattdessen periodisch
+Apaches `mod_status` (`server-status?auto`) und berechnet daraus die
+serverweite (nicht pro Gruppe/IP) Requestrate:
+`RPS ≈ (TotalAccesses[n] − TotalAccesses[n−1]) / Δt`. Jede Gruppe mit
+aktiviertem AutoBlock entscheidet unabhängig anhand ihres eigenen,
+randomisierten Schwellwerts, ob *sie* sich deswegen selbst temporär blockt -
+das AutoBlock-Ziel ist ausdrücklich **kein** Schutz vor kurzen Peaks, sondern
+gegen länger andauerndes Scraping.
+
+Globale Einstellungen in `fairdb.yml` (Abschnitt `autoBlock`):
+```yaml
+autoBlock:
+  statusURL: "http://127.0.0.1/server-status?auto"
+  measureIntervalSeconds: 30   # y: wie oft neu gemessen/geprüft wird
+  measureWindowMinutes: 10     # x: gleitendes Zeitfenster des Durchschnitts
+  thresholdVariancePercent: 30 # +- Zufallsanteil auf den je Gruppe konfigurierten Schwellwert
+```
+Ein leerer `statusURL` deaktiviert das Feature komplett (kein Overhead, keine
+Gruppen-Karte im WebUI).
+
+**Verhältnis von Messzeitraum (x) und Messintervall (y):** Bei jedem Tick
+(alle y Sekunden) wird der gleitende x-Minuten-Durchschnitt neu berechnet und
+sofort geprüft - y bestimmt also, wie schnell reagiert wird, x bestimmt, wie
+unempfindlich der Durchschnitt gegenüber kurzen Peaks ist (ein kurzer
+Ausschlag verschiebt einen 10-Minuten-Schnitt kaum, einen 2-Minuten-Schnitt
+aber deutlich). Damit über die Laufzeit genug Messpunkte in jedem Fenster
+liegen, sollte x mindestens das 3-fache von y sein (z. B. 30s/10min); fairDB
+loggt beim Start eine Warnung, wenn das nicht der Fall ist.
+
+**Verhalten, wenn `server-status?auto` nicht antwortet:** Fail-open, nie
+fail-closed. Ist der letzte erfolgreiche Poll älter als 2×Intervall oder
+liegen noch nicht genug Daten fürs Fenster vor, gilt die Messung als
+"unhealthy" - keine Gruppe wird auf Basis fehlender/veralteter Daten
+geblockt. Der Zustand (aktueller Ø-RPS, verlässlich ja/nein) wird auf der
+Gruppen-Detailseite angezeigt.
+
+**Pro Gruppe** (Gruppen-Detailseite im Admin-Bereich): AutoBlock aktivieren
+mit Schwellwert (Ø req/s, wird bei jeder Prüfung zusätzlich um
+`thresholdVariancePercent` verzerrt) und einer Blockdauer-Spanne (min/max in
+Sekunden, bei Auslösung wird eine zufällige Dauer daraus gewählt).
+
+Da die Ratenmessung serverweit ist und nicht zwischen Gruppen unterscheidet,
+darf **immer nur eine einzige Gruppe gleichzeitig** AutoBlock aktiviert
+haben - sonst würden mehrere Gruppen unabhängig auf dasselbe Lastsignal
+reagieren. Ist AutoBlock bereits für eine andere Gruppe aktiviert, ist das
+Formular auf der Gruppenseite ausgegraut; erst nach dem Deaktivieren dort
+lässt sich AutoBlock für eine andere Gruppe aktivieren. Das wird zusätzlich
+auf DB-Ebene hart erzwungen (`idx_group_autoblock_singleton_enabled`).
+
+Eine explizit **whitelisted** Gruppe wird nie automatisch geblockt. Läuft eine
+manuelle Whitelist-/Block-/Deaktivierungs-Aktion (WebUI oder API), wird ein
+gerade laufender AutoBlock sofort beendet, damit sein automatischer Revert
+die manuelle Entscheidung später nicht überschreibt. Beim Deaktivieren von
+AutoBlock für eine gerade automatisch geblockte Gruppe wird sofort
+zurückgesetzt (Export + Apache-Reload), damit die Gruppe nicht dauerhaft
+geblockt bleibt.
+
 ## API
 Ein Bearer-Auth-geschütztes JSON-API steht unter `/api/v1` bereit (Token
 siehe `envFile` oben; ohne konfigurierten Token antwortet das API mit `503`).

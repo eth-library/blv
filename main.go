@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 
+	"github.com/SvenKethz/fairdb/internal/autoblock"
 	app "github.com/SvenKethz/fairdb/internal/configuration"
 	"github.com/SvenKethz/fairdb/internal/db"
 	"github.com/SvenKethz/fairdb/internal/functions"
@@ -76,7 +78,21 @@ func main() {
 			log.Fatalf("Fehler beim Abgleich mit der Apache-Konfiguration: %v", err)
 		}
 
-		r := webserver.NewRouter(database, app.Config.BasePath)
+		var autoBlockManager *autoblock.Manager
+		if app.Config.AutoBlock.StatusURL == "" {
+			app.LogIt.Info("AutoBlock deaktiviert (kein statusURL konfiguriert)")
+		} else {
+			app.LogIt.Info("AutoBlock aktiv, starte Ratenmessung gegen " + app.Config.AutoBlock.StatusURL)
+			monitor := autoblock.NewRateMonitor(app.Config.AutoBlock)
+			ctx := context.Background()
+			go monitor.Run(ctx)
+			autoBlockManager = autoblock.NewManager(ctx, database, monitor, app.Config.AutoBlock)
+			if err := autoBlockManager.StartAll(); err != nil {
+				log.Fatalf("Fehler beim Starten der AutoBlock-Überwachung: %v", err)
+			}
+		}
+
+		r := webserver.NewRouter(database, app.Config.BasePath, autoBlockManager)
 		addr := fmt.Sprintf(":%d", app.Config.WebPort)
 		log.Printf("Starte Webserver auf %s ...", addr)
 		if err := r.Run(addr); err != nil {

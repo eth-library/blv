@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	// _ "github.com/mattn/go-sqlite3"
 	_ "modernc.org/sqlite"
@@ -76,6 +77,16 @@ func CreateTables(database *sql.DB) error {
 	       name TEXT NOT NULL UNIQUE,
 	       status TEXT NOT NULL DEFAULT ''
 	   );
+	   CREATE TABLE IF NOT EXISTS group_autoblock (
+	       group_name TEXT PRIMARY KEY,
+	       enabled INTEGER NOT NULL DEFAULT 0,
+	       threshold_rps REAL NOT NULL DEFAULT 0,
+	       block_duration_min_seconds INTEGER NOT NULL DEFAULT 0,
+	       block_duration_max_seconds INTEGER NOT NULL DEFAULT 0,
+	       active INTEGER NOT NULL DEFAULT 0,
+	       triggered_until TEXT
+	   );
+	   CREATE UNIQUE INDEX IF NOT EXISTS idx_group_autoblock_singleton_enabled ON group_autoblock (enabled) WHERE enabled = 1;
 	   `
 	if _, err := database.Exec(sqlStmt); err != nil {
 		return err
@@ -587,8 +598,15 @@ func SetGroupStatus(dbConn *sql.DB, groupName, status string) error {
 
 // DeleteGroup löscht eine Gruppe. Enthaltene Pools/Einträge bleiben bestehen,
 // werden aber ungruppiert (group_name = ”), damit keine Daten verloren gehen.
+// Eine eventuell vorhandene AutoBlock-Konfiguration der Gruppe wird mit
+// gelöscht (siehe DeleteAutoBlockSettings) - sonst bliebe ein verwaister
+// Datensatz zurück, der nach einer gleichnamigen Neuanlage der Gruppe
+// unerwartet wieder auftaucht.
 func DeleteGroup(dbConn *sql.DB, groupName string) error {
 	if _, err := dbConn.Exec(`UPDATE pools SET group_name = '' WHERE group_name = ?`, groupName); err != nil {
+		return err
+	}
+	if err := DeleteAutoBlockSettings(dbConn, groupName); err != nil {
 		return err
 	}
 	_, err := dbConn.Exec(`DELETE FROM groups WHERE name = ?`, groupName)
@@ -662,4 +680,153 @@ func SyncGroupStatusesFromPools(database *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// ===============
+// AutoBlock
+// ===============
+
+// autoBlockTimeFormat wird für triggered_until verwendet (Text-Spalte,
+// SQLite kennt keinen nativen Zeitstempel-Typ).
+const autoBlockTimeFormat = time.RFC3339
+
+// AutoBlockSettings ist die je Gruppe konfigurierte Scraping-Schutz-
+// Einstellung (siehe internal/autoblock) plus deren aktuellen Laufzeitstatus
+// (Active/TriggeredUntil - wird von der Gruppen-AutoBlock-Goroutine selbst
+// gepflegt, nicht vom Admin).
+type AutoBlockSettings struct {
+	GroupName               string
+	Enabled                 bool
+	ThresholdRPS            float64
+	BlockDurationMinSeconds int
+	BlockDurationMaxSeconds int
+	Active                  bool
+	TriggeredUntil          *time.Time
+}
+
+func scanAutoBlockSettings(row interface {
+	Scan(dest ...any) error
+}) (*AutoBlockSettings, error) {
+	var s AutoBlockSettings
+	var enabled, active int
+	var triggeredUntil sql.NullString
+	if err := row.Scan(&s.GroupName, &enabled, &s.ThresholdRPS, &s.BlockDurationMinSeconds, &s.BlockDurationMaxSeconds, &active, &triggeredUntil); err != nil {
+		return nil, err
+	}
+	s.Enabled = enabled != 0
+	s.Active = active != 0
+	if triggeredUntil.Valid && triggeredUntil.String != "" {
+		if t, err := time.Parse(autoBlockTimeFormat, triggeredUntil.String); err == nil {
+			s.TriggeredUntil = &t
+		}
+	}
+	return &s, nil
+}
+
+// GetAutoBlockSettings liefert die AutoBlock-Einstellung einer Gruppe, oder
+// nil, falls für sie noch nie eine Einstellung gespeichert wurde (kein Fehler).
+func GetAutoBlockSettings(dbConn *sql.DB, groupName string) (*AutoBlockSettings, error) {
+	row := dbConn.QueryRow(`
+        SELECT group_name, enabled, threshold_rps, block_duration_min_seconds, block_duration_max_seconds, active, triggered_until
+        FROM group_autoblock
+        WHERE group_name = ?
+    `, groupName)
+	s, err := scanAutoBlockSettings(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return s, nil
+}
+
+// ListEnabledAutoBlock liefert alle Gruppen mit aktivierter AutoBlock-
+// Überwachung - Grundlage für autoblock.Manager.StartAll beim Programmstart.
+func ListEnabledAutoBlock(dbConn *sql.DB) ([]AutoBlockSettings, error) {
+	rows, err := dbConn.Query(`
+        SELECT group_name, enabled, threshold_rps, block_duration_min_seconds, block_duration_max_seconds, active, triggered_until
+        FROM group_autoblock
+        WHERE enabled = 1
+    `)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var res []AutoBlockSettings
+	for rows.Next() {
+		s, err := scanAutoBlockSettings(rows)
+		if err != nil {
+			return nil, err
+		}
+		res = append(res, *s)
+	}
+	return res, rows.Err()
+}
+
+// GetEnabledAutoBlockGroup liefert den Namen der Gruppe, die gerade
+// AutoBlock aktiviert hat (enabled=1), falls es eine gibt. Wegen
+// idx_group_autoblock_singleton_enabled (siehe CreateTables) kann es nie mehr
+// als eine geben - nur eine Gruppe darf gleichzeitig AutoBlock aktiviert
+// haben, da die Ratenmessung serverweit ist und nicht zwischen Gruppen
+// unterscheidet (siehe autoblock.Manager.Enable).
+func GetEnabledAutoBlockGroup(dbConn *sql.DB) (groupName string, found bool, err error) {
+	row := dbConn.QueryRow(`SELECT group_name FROM group_autoblock WHERE enabled = 1 LIMIT 1`)
+	if err := row.Scan(&groupName); err != nil {
+		if err == sql.ErrNoRows {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return groupName, true, nil
+}
+
+// UpsertAutoBlockSettings legt die AutoBlock-Konfiguration einer Gruppe an
+// oder überschreibt sie (vom Admin im WebUI gepflegt). Active/TriggeredUntil
+// (Laufzeitstatus, siehe SetAutoBlockActive/ClearAutoBlockActive) bleiben
+// dabei unangetastet.
+func UpsertAutoBlockSettings(dbConn *sql.DB, groupName string, enabled bool, thresholdRPS float64, minSeconds, maxSeconds int) error {
+	_, err := dbConn.Exec(`
+        INSERT INTO group_autoblock(group_name, enabled, threshold_rps, block_duration_min_seconds, block_duration_max_seconds)
+        VALUES(?, ?, ?, ?, ?)
+        ON CONFLICT(group_name) DO UPDATE SET
+            enabled = excluded.enabled,
+            threshold_rps = excluded.threshold_rps,
+            block_duration_min_seconds = excluded.block_duration_min_seconds,
+            block_duration_max_seconds = excluded.block_duration_max_seconds
+    `, groupName, boolToInt(enabled), thresholdRPS, minSeconds, maxSeconds)
+	return err
+}
+
+// SetAutoBlockActive markiert eine Gruppe als gerade automatisch geblockt,
+// bis spätestens 'until' (siehe autoblock.Manager). Setzt voraus, dass für
+// die Gruppe bereits eine Zeile existiert (siehe UpsertAutoBlockSettings).
+func SetAutoBlockActive(dbConn *sql.DB, groupName string, until time.Time) error {
+	_, err := dbConn.Exec(`UPDATE group_autoblock SET active = 1, triggered_until = ? WHERE group_name = ?`, until.Format(autoBlockTimeFormat), groupName)
+	return err
+}
+
+// ClearAutoBlockActive beendet einen laufenden AutoBlock-Zustand einer
+// Gruppe (Revert durch autoblock.Manager selbst, oder weil ein Admin die
+// Gruppe manuell block/whitelist/deaktiviert hat - siehe webserver.go/api.go).
+// Ist die Gruppe gar nicht aktiv bzw. existiert noch keine Einstellung, ist
+// der Aufruf ein No-op.
+func ClearAutoBlockActive(dbConn *sql.DB, groupName string) error {
+	_, err := dbConn.Exec(`UPDATE group_autoblock SET active = 0, triggered_until = NULL WHERE group_name = ?`, groupName)
+	return err
+}
+
+// DeleteAutoBlockSettings löscht die AutoBlock-Konfiguration einer Gruppe
+// (z. B. weil die Gruppe selbst gelöscht wird, siehe DeleteGroup).
+func DeleteAutoBlockSettings(dbConn *sql.DB, groupName string) error {
+	_, err := dbConn.Exec(`DELETE FROM group_autoblock WHERE group_name = ?`, groupName)
+	return err
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }

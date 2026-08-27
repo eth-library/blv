@@ -9,10 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/SvenKethz/fairdb/internal/autoblock"
 	app "github.com/SvenKethz/fairdb/internal/configuration"
 	"github.com/SvenKethz/fairdb/internal/db"
 	"github.com/SvenKethz/fairdb/internal/functions"
@@ -62,6 +64,38 @@ func poolSummariesForGroup(database *sql.DB, groupName string) ([]PoolSummary, e
 	return summaries, nil
 }
 
+// addAutoBlockContext reichert ctx um die AutoBlock-Einstellung/den Status
+// einer Gruppe sowie den aktuellen globalen Ratenschnitt an (für die
+// Gruppen-Detailseite). Ist AutoBlock nicht konfiguriert (autoBlockManager
+// == nil), bleibt "autoBlockAvailable" false und das Template blendet die
+// entsprechende Karte aus.
+func addAutoBlockContext(ctx gin.H, database *sql.DB, autoBlockManager *autoblock.Manager, groupName string) {
+	if autoBlockManager == nil {
+		ctx["autoBlockAvailable"] = false
+		return
+	}
+	ctx["autoBlockAvailable"] = true
+	ctx["autoBlockMonitor"] = autoBlockManager.Monitor().Latest()
+	settings, err := db.GetAutoBlockSettings(database, groupName)
+	if err != nil {
+		app.LogIt.Debug(fmt.Sprintf("Fehler beim Laden der AutoBlock-Einstellung für %s: %v", groupName, err))
+		return
+	}
+	ctx["autoBlockSettings"] = settings
+
+	// Es darf immer nur eine Gruppe gleichzeitig AutoBlock aktiviert haben
+	// (siehe Manager.Enable) - für jede andere Gruppe wird die Aktivierung im
+	// Formular ausgegraut.
+	lockedBy, found, err := db.GetEnabledAutoBlockGroup(database)
+	if err != nil {
+		app.LogIt.Debug(fmt.Sprintf("Fehler beim Prüfen der AutoBlock-Sperre für %s: %v", groupName, err))
+		return
+	}
+	if found && lockedBy != groupName {
+		ctx["autoBlockLockedBy"] = lockedBy
+	}
+}
+
 // ConfFileInfo beschreibt eine bereits exportierte .conf-Datei für die
 // Aktivieren-Übersicht (welche Dateien liegen aktuell in whitelistPath/
 // blocklistPath).
@@ -90,7 +124,10 @@ func listConfFiles(path string) ([]ConfFileInfo, error) {
 	return files, nil
 }
 
-func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
+// NewRouter baut den fairDB-Webserver auf. autoBlockManager ist nil, wenn
+// AutoBlock nicht konfiguriert ist (siehe main.go) - alle AutoBlock-
+// bezogenen Routen/Template-Felder werden dann übersprungen bzw. bleiben leer.
+func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Manager) *gin.Engine {
 	dr := gin.Default()
 	dr.SetTrustedProxies(app.Config.TrustedProxies)
 	dr.LoadHTMLGlob(app.Config.WebfilesPath + "templates/*.html")
@@ -312,7 +349,7 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			})
 			return
 		}
-		c.HTML(http.StatusOK, "group_detail.html", gin.H{
+		ctx := gin.H{
 			"title":       "Gruppe " + groupName,
 			"group":       groupName,
 			"groupStatus": status,
@@ -320,12 +357,17 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 			"error":       c.Query("error"),
 			"message":     c.Query("message"),
 			"BasePath":    BasePath,
-		})
+		}
+		addAutoBlockContext(ctx, database, autoBlockManager, groupName)
+		c.HTML(http.StatusOK, "group_detail.html", ctx)
 	})
 
 	// Gruppe whitelisten (blockte Pools verhindern das Whitelisten, siehe db.WhitelistPool)
 	admin.POST("/groups/:name/whitelist", func(c *gin.Context) {
 		groupName := c.Param("name")
+		// Eine manuelle Aktion hat immer Vorrang vor einem laufenden AutoBlock -
+		// sonst würde dessen Revert-Timer die manuelle Entscheidung später überschreiben.
+		_ = db.ClearAutoBlockActive(database, groupName)
 		conflicts, _, _, err, reloadErr := functions.WhitelistGroup(database, groupName)
 		if err != nil {
 			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+err.Error())
@@ -351,6 +393,10 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	// Gruppe blocken
 	admin.POST("/groups/:name/block", func(c *gin.Context) {
 		groupName := c.Param("name")
+		// siehe Kommentar bei /whitelist: manuelle Aktion räumt einen
+		// laufenden AutoBlock-Zustand auf, damit dessen Revert-Timer diese
+		// manuelle Entscheidung nicht später zurücknimmt.
+		_ = db.ClearAutoBlockActive(database, groupName)
 		_, _, err, reloadErr := functions.BlockGroup(database, groupName)
 		if err != nil {
 			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+err.Error())
@@ -381,8 +427,43 @@ func NewRouter(database *sql.DB, BasePath string) *gin.Engine {
 	// Gruppe löschen (enthaltene Pools werden ungruppiert, nicht gelöscht)
 	admin.POST("/groups/:name/delete", func(c *gin.Context) {
 		groupName := c.Param("name")
+		if autoBlockManager != nil {
+			// Läuft gerade eine AutoBlock-Überwachung für diese Gruppe, muss
+			// sie gestoppt werden, bevor die Gruppe verschwindet (siehe
+			// DeleteGroup, das auch die AutoBlock-Einstellung mit löscht).
+			_ = autoBlockManager.Disable(groupName)
+		}
 		_ = db.DeleteGroup(database, groupName)
 		c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups")
+	})
+
+	// AutoBlock einer Gruppe konfigurieren/aktivieren/deaktivieren
+	admin.POST("/groups/:name/autoblock", func(c *gin.Context) {
+		groupName := c.Param("name")
+		if autoBlockManager == nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape("AutoBlock ist nicht konfiguriert (kein statusURL in der fairDB-Config)"))
+			return
+		}
+		if c.PostForm("enabled") == "" {
+			if err := autoBlockManager.Disable(groupName); err != nil {
+				c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape(err.Error()))
+				return
+			}
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?message="+url.QueryEscape("AutoBlock deaktiviert."))
+			return
+		}
+		thresholdRPS, errT := strconv.ParseFloat(strings.TrimSpace(c.PostForm("thresholdRPS")), 64)
+		minSeconds, errMin := strconv.Atoi(strings.TrimSpace(c.PostForm("blockDurationMinSeconds")))
+		maxSeconds, errMax := strconv.Atoi(strings.TrimSpace(c.PostForm("blockDurationMaxSeconds")))
+		if errT != nil || errMin != nil || errMax != nil || thresholdRPS <= 0 || minSeconds <= 0 || maxSeconds < minSeconds {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape("Ungültige AutoBlock-Werte (Schwellwert > 0, 0 < Blockdauer-Min <= Blockdauer-Max erforderlich)"))
+			return
+		}
+		if err := autoBlockManager.Enable(groupName, thresholdRPS, minSeconds, maxSeconds); err != nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape(err.Error()))
+			return
+		}
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?message="+url.QueryEscape("AutoBlock aktiviert."))
 	})
 
 	// Pool einer Gruppe zuweisen

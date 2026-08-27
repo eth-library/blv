@@ -73,6 +73,9 @@ func RegisterAPIRoutes(r *gin.RouterGroup, database *sql.DB) {
 
 	api.POST("/groups/:name/block", func(c *gin.Context) {
 		groupName := c.Param("name")
+		// Eine manuelle API-Aktion hat Vorrang vor einem laufenden AutoBlock -
+		// sonst würde dessen Revert-Timer sie später überschreiben.
+		_ = db.ClearAutoBlockActive(database, groupName)
 		wCount, bCount, err, reloadErr := functions.BlockGroup(database, groupName)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -87,6 +90,7 @@ func RegisterAPIRoutes(r *gin.RouterGroup, database *sql.DB) {
 
 	api.POST("/groups/:name/whitelist", func(c *gin.Context) {
 		groupName := c.Param("name")
+		_ = db.ClearAutoBlockActive(database, groupName)
 		conflicts, wCount, bCount, err, reloadErr := functions.WhitelistGroup(database, groupName)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -108,6 +112,7 @@ func RegisterAPIRoutes(r *gin.RouterGroup, database *sql.DB) {
 
 	api.POST("/groups/:name/deactivate", func(c *gin.Context) {
 		groupName := c.Param("name")
+		_ = db.ClearAutoBlockActive(database, groupName)
 		wCount, bCount, err, reloadErr := functions.DeactivateGroup(database, groupName)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

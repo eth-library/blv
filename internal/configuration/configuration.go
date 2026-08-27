@@ -35,22 +35,34 @@ var (
 // ========================
 
 type ApplicationConfig struct {
-	DbPath              string    `yaml:"dbPath"`
-	WhitelistPath       string    `yaml:"whitelistPath"`
-	BlocklistPath       string    `yaml:"blocklistPath"`
-	BackupPath          string    `yaml:"backupPath"`
-	WebfilesPath        string    `yaml:"webfilesPath"`
-	BasePath            string    `yaml:"basePath"`
-	WebPort             int       `yaml:"webPort"`
-	TrustedProxies      []string  `yaml:"trustedProxies"`
-	EnvFile             string    `yaml:"envFile"`
-	ApacheReloadCommand []string  `yaml:"apacheReloadCommand"`
-	Logcfg              LogConfig `yaml:"LogConfig"`
+	DbPath              string          `yaml:"dbPath"`
+	WhitelistPath       string          `yaml:"whitelistPath"`
+	BlocklistPath       string          `yaml:"blocklistPath"`
+	BackupPath          string          `yaml:"backupPath"`
+	WebfilesPath        string          `yaml:"webfilesPath"`
+	BasePath            string          `yaml:"basePath"`
+	WebPort             int             `yaml:"webPort"`
+	TrustedProxies      []string        `yaml:"trustedProxies"`
+	EnvFile             string          `yaml:"envFile"`
+	ApacheReloadCommand []string        `yaml:"apacheReloadCommand"`
+	Logcfg              LogConfig       `yaml:"LogConfig"`
+	AutoBlock           AutoBlockConfig `yaml:"autoBlock"`
 }
 
 type LogConfig struct {
 	LogLevel  string `yaml:"LogLevel"`
 	LogFolder string `yaml:"LogFolder"`
+}
+
+// AutoBlockConfig steuert die serverweite Request-Ratenmessung (Basis für den
+// automatischen Scraping-Schutz je Gruppe, siehe internal/autoblock). Leerer
+// StatusURL deaktiviert das Feature komplett - es wird dann weder ein
+// RateMonitor noch ein autoblock.Manager gestartet.
+type AutoBlockConfig struct {
+	StatusURL                string `yaml:"statusURL"`
+	MeasureIntervalSeconds   int    `yaml:"measureIntervalSeconds"`
+	MeasureWindowMinutes     int    `yaml:"measureWindowMinutes"`
+	ThresholdVariancePercent int    `yaml:"thresholdVariancePercent"`
 }
 
 func Initialize(appName string, cfgPath string) {
@@ -117,6 +129,12 @@ func (config *ApplicationConfig) setDefaults() {
 			LogLevel:  "INFO",
 			LogFolder: "./logs/",
 		},
+		AutoBlock: AutoBlockConfig{
+			StatusURL:                "",
+			MeasureIntervalSeconds:   30,
+			MeasureWindowMinutes:     10,
+			ThresholdVariancePercent: 30,
+		},
 	}
 }
 
@@ -135,6 +153,27 @@ func (c *ApplicationConfig) CheckConfig() {
 		if err := helpers.EnsureDir(dir); err != nil {
 			fmt.Println("Konnte Verzeichnis nicht anlegen: " + dir + ": " + err.Error())
 		}
+	}
+
+	c.checkAutoBlockConfig()
+}
+
+// checkAutoBlockConfig warnt bei einer Fensterkonfiguration, die die
+// Messung sinnlos macht (Intervall >= Fenster, siehe README), deaktiviert das
+// Feature aber nicht - eine offensichtlich fehlerhafte, aber nicht
+// katastrophale Konfiguration soll den unbeaufsichtigten Start nicht
+// verhindern.
+func (c *ApplicationConfig) checkAutoBlockConfig() {
+	if c.AutoBlock.StatusURL == "" {
+		return
+	}
+	windowSeconds := c.AutoBlock.MeasureWindowMinutes * 60
+	if c.AutoBlock.MeasureIntervalSeconds <= 0 || windowSeconds <= 0 {
+		fmt.Println("AutoBlock: measureIntervalSeconds und measureWindowMinutes müssen > 0 sein - AutoBlock bleibt ohne sinnvolle Messung")
+		return
+	}
+	if windowSeconds < 3*c.AutoBlock.MeasureIntervalSeconds {
+		fmt.Printf("AutoBlock: measureWindowMinutes (%dmin) ist kleiner als das 3-fache von measureIntervalSeconds (%ds) - die Messung deckt große Zeitanteile nicht ab, siehe README\n", c.AutoBlock.MeasureWindowMinutes, c.AutoBlock.MeasureIntervalSeconds)
 	}
 }
 
