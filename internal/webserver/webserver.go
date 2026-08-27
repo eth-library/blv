@@ -77,6 +77,7 @@ func addAutoBlockContext(ctx gin.H, database *sql.DB, autoBlockManager *autobloc
 	ctx["autoBlockAvailable"] = true
 	ctx["autoBlockMonitor"] = autoBlockManager.Monitor().Latest()
 	ctx["autoBlockVariancePercent"] = app.Config.AutoBlock.ThresholdVariancePercent
+	ctx["autoBlockWindowMinutes"] = app.Config.AutoBlock.MeasureWindowMinutes
 	settings, err := db.GetAutoBlockSettings(database, groupName)
 	if err != nil {
 		app.LogIt.Debug(fmt.Sprintf("Fehler beim Laden der AutoBlock-Einstellung für %s: %v", groupName, err))

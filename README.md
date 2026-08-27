@@ -247,8 +247,12 @@ loggt beim Start eine Warnung, wenn das nicht der Fall ist.
 fail-closed. Ist der letzte erfolgreiche Poll älter als 2×Intervall oder
 liegen noch nicht genug Daten fürs Fenster vor, gilt die Messung als
 "unhealthy" - keine Gruppe wird auf Basis fehlender/veralteter Daten
-geblockt. Der Zustand (aktueller Ø-RPS, verlässlich ja/nein) wird auf der
-Gruppen-Detailseite angezeigt.
+geblockt. Der Zustand wird auf der Gruppen-Detailseite angezeigt und
+unterscheidet dabei zwei Fälle: "server-status nicht erreichbar" (echtes
+Problem, server-status antwortet nicht) und "Datenbasis wird aufgebaut: X von
+Y Minuten erfasst" (normale Aufwärmphase - direkt nach dem Start bzw. nach
+einem Zähler-Reset von Apache dauert es bis zu `measureWindowMinutes` Minuten,
+bis genug Daten für einen verlässlichen Durchschnitt vorliegen).
 
 **Pro Gruppe** (Gruppen-Detailseite im Admin-Bereich): AutoBlock aktivieren
 mit Schwellwert (Ø req/s, wird bei jeder Prüfung zusätzlich um

@@ -110,7 +110,13 @@
         {{ with .autoBlockMonitor }}
           <p>
             Aktuelle Messung: Ø {{ printf "%.2f" .AvgRPS }} req/s
-            {{ if .Healthy }} (verlässlich){{ else }} (noch nicht verlässlich / server-status nicht erreichbar){{ end }}
+            {{ if .Healthy }}
+              (verlässlich)
+            {{ else if not .Reachable }}
+              (server-status nicht erreichbar - siehe Log)
+            {{ else }}
+              (Datenbasis wird aufgebaut: {{ printf "%.1f" .WindowCoverage.Minutes }} von {{ $.autoBlockWindowMinutes }} Minuten erfasst)
+            {{ end }}
           </p>
         {{ end }}
         {{ with .autoBlockSettings }}

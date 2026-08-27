@@ -22,11 +22,18 @@ import (
 )
 
 // Snapshot ist der zuletzt berechnete Zustand der Ratenmessung - nicht
-// blockierend über RateMonitor.Latest() abfragbar.
+// blockierend über RateMonitor.Latest() abfragbar. Healthy ist die einzige
+// Information, die für AutoBlock-Entscheidungen zählt (siehe
+// Manager.evaluate); Reachable/WindowCoverage sind zusätzlich für die
+// WebUI-Anzeige gedacht, um "sammle noch Daten" (normal, vorübergehend) von
+// "server-status wirklich nicht erreichbar" (echtes Problem) unterscheiden
+// zu können - beides führte vorher zur selben, dadurch irreführenden Meldung.
 type Snapshot struct {
-	AvgRPS    float64
-	Healthy   bool
-	SampledAt time.Time
+	AvgRPS         float64
+	Healthy        bool
+	Reachable      bool
+	WindowCoverage time.Duration
+	SampledAt      time.Time
 }
 
 // sample ist ein einzelner erfolgreicher Poll von statusURL.
@@ -146,8 +153,10 @@ func (m *RateMonitor) publish(now time.Time) {
 		last := m.samples[len(m.samples)-1]
 		elapsed := last.at.Sub(first.at)
 		staleness := now.Sub(last.at)
-		if elapsed > 0 && staleness < 2*m.interval {
+		snap.Reachable = staleness < 2*m.interval
+		if elapsed > 0 && snap.Reachable {
 			snap.AvgRPS = float64(last.total-first.total) / elapsed.Seconds()
+			snap.WindowCoverage = elapsed
 			snap.Healthy = elapsed >= m.window-m.interval
 		}
 	}
