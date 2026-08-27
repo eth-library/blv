@@ -5,8 +5,6 @@ import (
 	"log"
 	"log/slog"
 	"os"
-	"strings"
-	"time"
 
 	"github.com/SvenKethz/fairdb/internal/helpers"
 	"gopkg.in/yaml.v3"
@@ -184,50 +182,22 @@ type File2Parse struct {
 	FileName string
 }
 
+// SetupLogging öffnet fairdb.log im konfigurierten LogFolder - fester Name,
+// keine interne Zeitstempel-/Rotationslogik mehr. Rotation ist Aufgabe von
+// logrotate (siehe README), genau wie bei Apache: fairDB öffnet die Datei im
+// Append-Modus und schreibt einfach weiter, unabhängig davon, ob sie schon
+// existiert (z. B. nach einem Neustart) oder gerade von logrotate rotiert
+// wurde.
 func SetupLogging(logcfg LogConfig, ApplicationName string) *slog.Logger {
-	filename := ApplicationName
-	if logcfg.LogLevel == "Debug" {
-		filename += ".log"
-	} else {
-		filename += "_" + time.Now().Format("20060102_150405") + ".log"
-	}
+	filename := ApplicationName + ".log"
 	if logcfg.LogFolder == "" {
 		cwd, _ := os.Getwd()
 		logcfg.LogFolder = cwd + "/logs/"
 		fmt.Println("no LogFolder provided")
 	}
-	// check, if logfile exists (eg after crash) and move it
-	// set up regular log rotation with unix's logrotate
-	// (e.g. https://medium.com/rahasak/golang-logging-with-unix-logrotate-41ec2672b439)
-	if helpers.FileExists(logcfg.LogFolder + filename) {
-
-		today := time.Now().Format("2006-01-02")
-		newfilename := filename + "_" + today
-		if helpers.FileExists(logcfg.LogFolder + newfilename) {
-			counter := 0
-			logfiles, err := os.ReadDir(logcfg.LogFolder)
-			if err != nil {
-				fmt.Println("ERROR", fmt.Sprint(err))
-			}
-			for _, file := range logfiles {
-				if strings.HasPrefix(file.Name(), newfilename) {
-					counter++
-				}
-			}
-			newfilename = newfilename + "." + fmt.Sprint(counter)
-		}
-		fmt.Println("logfile " + logcfg.LogFolder + filename + " exists,")
-		fmt.Println("will move it to " + logcfg.LogFolder + newfilename)
-		err := os.Rename(logcfg.LogFolder+filename, logcfg.LogFolder+newfilename)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-
-	}
 	logSource := false
 	logLevel := new(slog.LevelVar)
-	logFile, err := os.OpenFile(logcfg.LogFolder+filename, os.O_CREATE|os.O_WRONLY, 0o666)
+	logFile, err := os.OpenFile(logcfg.LogFolder+filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
