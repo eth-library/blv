@@ -19,9 +19,11 @@ import (
 
 // ImportConf liest eine Apache-Konfigurationsdatei bzw. IP-Liste (z. B. ein
 // Upload im Admin-Bereich) und legt die Einträge als neuen bzw. ergänzten
-// Pool an. Für Fremd-Listen gedacht (z. B. eine heruntergeladene Blockliste) -
-// fairDB liest niemals seine eigenen Exporte zurück, die DB ist alleinige
-// Source of Truth.
+// Pool an. Für Fremd-Listen gedacht (z. B. eine heruntergeladene Blockliste).
+// Anders als SyncDBWithApacheState (Abgleich bekannter, bereits in der DB
+// vorhandener Pools/Gruppen beim Programmstart) legt ImportConf bewusst immer
+// neue Einträge an - für den manuellen Admin-Upload ist die hochgeladene
+// Datei die Quelle neuer Daten, nicht ein Abgleich bestehender.
 func ImportConf(database *sql.DB, r io.Reader, poolName string, status string) error {
 	scanner := bufio.NewScanner(r)
 

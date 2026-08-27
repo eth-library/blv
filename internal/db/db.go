@@ -425,6 +425,15 @@ func DeleteByID(dbConn *sql.DB, entryID string) error {
 	return err
 }
 
+// SetEntryStatus setzt den Status eines einzelnen Eintrags direkt, auch auf
+// "" (anders als WhitelistByID/BlockByID). Für den Abgleich der DB mit dem
+// tatsächlichen Apache-Zustand beim Programmstart gedacht (siehe
+// functions.SyncDBWithApacheState).
+func SetEntryStatus(dbConn *sql.DB, id int, status string) error {
+	_, err := dbConn.Exec(`UPDATE pools SET status = ? WHERE id = ?`, status, id)
+	return err
+}
+
 // findOverlappingBlacklistForPool liefert in einer einzigen Abfrage alle
 // anderswo (nicht poolName selbst) geblockten Einträge, deren CIDR-Bereich
 // irgendeinen Eintrag von poolName überlappt - ein Self-Join statt einer
@@ -594,4 +603,63 @@ func AssignPoolToGroup(dbConn *sql.DB, poolName, groupName string) error {
 	}
 	_, err := dbConn.Exec(`UPDATE pools SET group_name = ? WHERE name = ?`, groupName, poolName)
 	return err
+}
+
+// SyncGroupStatusesFromPools berechnet für jede Gruppe mit mindestens einem
+// zugeordneten Pool-Eintrag den Gruppenstatus aus dem tatsächlichen Status
+// ihrer Pools neu (nur "b" -> blocked, nur "w" -> whitelisted, gemischt/leer
+// -> inaktiv - dieselbe Regel wie backfillGroupsFromExistingPools). Für den
+// Abgleich der DB mit dem tatsächlichen Apache-Zustand beim Programmstart
+// gedacht (siehe functions.SyncDBWithApacheState), nachdem dort die
+// Einzelstatus der Pool-Einträge bereits korrigiert wurden.
+func SyncGroupStatusesFromPools(database *sql.DB) error {
+	rows, err := database.Query(`
+        SELECT group_name, status, count(*)
+        FROM pools
+        WHERE group_name != ''
+        GROUP BY group_name, status
+    `)
+	if err != nil {
+		return err
+	}
+	type counts struct{ w, b int }
+	byGroup := make(map[string]*counts)
+	for rows.Next() {
+		var groupName, status string
+		var n int
+		if err := rows.Scan(&groupName, &status, &n); err != nil {
+			rows.Close()
+			return err
+		}
+		c, ok := byGroup[groupName]
+		if !ok {
+			c = &counts{}
+			byGroup[groupName] = c
+		}
+		switch status {
+		case "w":
+			c.w = n
+		case "b":
+			c.b = n
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	for groupName, c := range byGroup {
+		status := ""
+		if c.w == 0 && c.b != 0 {
+			status = "b"
+		}
+		if c.b == 0 && c.w != 0 {
+			status = "w"
+		}
+		if err := SetGroupStatus(database, groupName, status); err != nil {
+			return err
+		}
+	}
+	return nil
 }

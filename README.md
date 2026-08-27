@@ -7,10 +7,14 @@ blocked / inaktiv); wird sie aktiviert, schreibt fairDB die zugehörigen
 `.conf`-Dateien in die konfigurierten Verzeichnisse und lädt Apache
 automatisch neu.
 
-Die SQLite-Datenbank ist die **alleinige Source of Truth**: fairDB liest nie
-bestehende `.conf`-Dateien ein (weder eigene Exporte noch fremde) - Import
-geschieht ausschließlich über den Datei-Upload im Admin-Bereich, der neue
-Pools/Einträge in die DB einfügt.
+Die SQLite-Datenbank ist die **Source of Truth für den laufenden Betrieb**:
+neue Pools/Einträge entstehen ausschließlich über das Web-UI/API oder den
+Datei-Upload im Admin-Bereich. Beim **Start** gleicht fairDB einmalig den in
+der DB gespeicherten Status jedes Eintrags mit dem tatsächlichen Inhalt von
+`whitelistPath`/`blocklistPath` ab (siehe unten) - in diesem Moment sind die
+vorhandenen `.conf`-Dateien maßgeblich, damit die DB nicht an Apache
+vorbeidriftet (z. B. nach einem manuellen Eingriff im Apache-Verzeichnis oder
+einer aus einer älteren Sicherung wiederhergestellten DB).
 
 ## Installation
 Die Installation besteht aus drei Elementen:
@@ -232,11 +236,30 @@ lässt sich aber auch lokal starten, z. B. zum Test oder um eine frische,
 leere Datenbank anzulegen:
 ```
 fairdb -c ./conf.d/fairdb.yml -init   # legt eine neue, leere DB an
-fairdb -c ./conf.d/fairdb.yml         # normaler Start (inkl. Schema-Migration)
+fairdb -c ./conf.d/fairdb.yml         # normaler Start (inkl. Schema-Migration + Apache-Abgleich)
 ```
-Ein `-reset` (DB aus bestehenden Dateien neu einlesen) gibt es nicht - die
-Datenbank ist die alleinige Source of Truth, fairDB liest nie eigene oder
-fremde Exporte zurück.
+
+### Abgleich mit Apache beim Start
+Bei jedem normalen Start (nicht bei `-init`) gleicht fairDB den Status jedes
+bereits vorhandenen Pool-Eintrags mit dem tatsächlichen Inhalt von
+`whitelistPath`/`blocklistPath` ab, bevor der Webserver startet:
+
+- Berücksichtigt werden ausschließlich `.conf`-Dateien, deren Name (ohne
+  Endung) exakt einem **bekannten** Pool- oder Gruppennamen aus der DB
+  entspricht. Alle anderen Dateien werden ignoriert und nicht angefasst.
+- Für Gruppen-Dateien (mit `#----`-Abschnitten je Pool, siehe
+  [Gruppen und Pools](#gruppen-und-pools)) wird jeder Abschnitt seinem im
+  Header genannten Pool zugeordnet; für eine flache, nicht segmentierte Datei
+  gilt ihr Dateiname als Poolname.
+- Für jeden vorhandenen Eintrag gilt die jeweilige Datei in diesem Moment als
+  Source of Truth: taucht sein CIDR in einer bekannten Whitelist-Datei auf,
+  wird der Status auf `w` gesetzt, in einer Blocklist-Datei auf `b`. Fehlt er
+  in beiden (auch wenn die Datei komplett fehlt), wird der Status auf ``
+  zurückgesetzt. Der Gruppenstatus wird anschließend aus dem neuen
+  Pool-Status neu berechnet.
+- Es werden dabei **nie** neue Pools/Einträge angelegt und **nie** in
+  `whitelistPath`/`blocklistPath` geschrieben (auch keine Status- oder
+  Marker-Datei) - reine Leseoperation.
 
 Start/Stop als systemd-Service:
 ```

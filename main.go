@@ -71,6 +71,11 @@ func main() {
 			log.Fatalf("Fehler bei der Schema-Migration: %v", err)
 		}
 
+		app.LogIt.Info("Gleiche DB-Status mit den vorhandenen Apache-Konfigurationsdateien ab ...")
+		if err := functions.SyncDBWithApacheState(database, app.Config.WhitelistPath, app.Config.BlocklistPath); err != nil {
+			log.Fatalf("Fehler beim Abgleich mit der Apache-Konfiguration: %v", err)
+		}
+
 		r := webserver.NewRouter(database, app.Config.BasePath)
 		addr := fmt.Sprintf(":%d", app.Config.WebPort)
 		log.Printf("Starte Webserver auf %s ...", addr)
