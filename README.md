@@ -124,6 +124,11 @@ Logfile. Schlägt der Reload fehl, bleiben die bereits geschriebenen
 `.conf`-Dateien trotzdem gültig; der Fehler wird im Admin-Bereich bzw. in der
 API-Antwort angezeigt.
 
+Reloads laufen serialisiert (nie zwei `systemctl reload`-Prozesse gleichzeitig)
+und sind auf 90 Sekunden begrenzt - ein hängender/sehr langsamer Reload
+blockiert damit nicht mehr unbegrenzt den auslösenden Request (WebUI oder
+API), sondern liefert nach spätestens 90s einen Timeout-Fehler zurück.
+
 Der Service-User benötigt dafür ein passendes NOPASSWD-sudoers-Recht, z. B.
 in `/etc/sudoers.d/fairdb`:
 ```
@@ -208,6 +213,13 @@ POST /api/v1/groups/:name/deactivate   Gruppe deaktivieren (weder w noch b, Expo
 ```
 Eine Deaktivierung entfernt die Gruppe aus beiden Dateien (Whitelist und
 Blocklist) - taucht danach in keiner der beiden mehr auf.
+
+`block`/`whitelist`/`deactivate` sind idempotent: hat die Gruppe (inkl. aller
+enthaltenen Pools) bereits exakt den Zielstatus, wird kein erneuter
+Export/Apache-Reload ausgelöst - der Aufruf kehrt sofort zurück. Das macht
+wiederholte Aufrufe billig, z. B. aus einem Skript, das eine Gruppe blockt,
+solange eine Rate-Schwelle überschritten bleibt.
+
 Beispiel:
 ```bash
 curl -H "Authorization: Bearer <API_TOKEN>" https://.../api/v1/groups/Scraping-Netz

@@ -22,7 +22,6 @@ type PoolEntry struct {
 	GroupName  string
 	Comment    string
 	Status     string
-	CheckedIP  string
 }
 
 type GroupEntry struct {
@@ -65,6 +64,7 @@ func CreateTables(database *sql.DB) error {
 	   );
 	   CREATE INDEX IF NOT EXISTS idx_ip_range ON pools (start_ip_int, end_ip_int);
 	   CREATE INDEX IF NOT EXISTS idx_pool_name ON pools (name);
+	   CREATE INDEX IF NOT EXISTS idx_pool_status_range ON pools (status, start_ip_int, end_ip_int);
 	   CREATE TABLE IF NOT EXISTS lut (
 	       id INTEGER PRIMARY KEY AUTOINCREMENT,
 	       ip_int INTEGER NOT NULL,
@@ -311,26 +311,6 @@ func FindPoolByIP(dbConn *sql.DB, ipUint uint32) (*PoolEntry, error) {
 	return p, nil
 }
 
-func FindBlacklistByIP(dbConn *sql.DB, ipUint uint32) (*PoolEntry, error) {
-	row := dbConn.QueryRow(`
-        SELECT id, start_ip_int, end_ip_int, cidr, name, group_name, comment, status
-        FROM pools
-        WHERE status = "b"
-        AND ? BETWEEN start_ip_int AND end_ip_int
-        ORDER BY end_ip_int - start_ip_int ASC
-        LIMIT 1
-    `, ipUint)
-
-	p := &PoolEntry{}
-	if err := row.Scan(&p.ID, &p.StartIPInt, &p.EndIPInt, &p.CIDR, &p.Name, &p.GroupName, &p.Comment, &p.Status); err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return p, nil
-}
-
 func ListByPool(dbConn *sql.DB, poolName string) ([]PoolEntry, error) {
 	rows, err := dbConn.Query(`
         SELECT id, start_ip_int, end_ip_int, cidr, name, group_name, comment, status
@@ -445,24 +425,45 @@ func DeleteByID(dbConn *sql.DB, entryID string) error {
 	return err
 }
 
+// findOverlappingBlacklistForPool liefert in einer einzigen Abfrage alle
+// anderswo (nicht poolName selbst) geblockten Einträge, deren CIDR-Bereich
+// irgendeinen Eintrag von poolName überlappt - ein Self-Join statt einer
+// Prüfung pro einzelner IP-Adresse oder auch nur einer Query pro Eintrag
+// (siehe WhitelistPool: bei CIDR-Bereichen wie /8, 16,7 Mio. Adressen, und
+// Pools mit tausenden Einträgen würde beides den Server praktisch einfrieren
+// bzw. bei sehr großen Gruppen mehrere Minuten dauern).
+func findOverlappingBlacklistForPool(dbConn *sql.DB, poolName string) ([]PoolEntry, error) {
+	rows, err := dbConn.Query(`
+        SELECT DISTINCT o.id, o.start_ip_int, o.end_ip_int, o.cidr, o.name, o.group_name, o.comment, o.status
+        FROM pools p
+        JOIN pools o
+          ON o.status = 'b' AND o.name != p.name
+         AND o.start_ip_int <= p.end_ip_int AND o.end_ip_int >= p.start_ip_int
+        WHERE p.name = ?
+    `, poolName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var res []PoolEntry
+	for rows.Next() {
+		var p PoolEntry
+		if err := rows.Scan(&p.ID, &p.StartIPInt, &p.EndIPInt, &p.CIDR, &p.Name, &p.GroupName, &p.Comment, &p.Status); err != nil {
+			return nil, err
+		}
+		res = append(res, p)
+	}
+	return res, rows.Err()
+}
+
 // Einen Pool whitelisten
 func WhitelistPool(dbConn *sql.DB, poolName string) ([]PoolEntry, error) {
 	app.LogIt.Debug("whitelisting pool " + poolName)
-	var foundEntries []PoolEntry
-	entries, err := ListByPool(dbConn, poolName)
+	foundEntries, err := findOverlappingBlacklistForPool(dbConn, poolName)
 	if err != nil {
-		app.LogIt.Error(fmt.Sprintf("beim Whitelisten von Pool %s wurden keine Einträge gefunden: %v", poolName, err))
-	}
-	for _, entry := range entries {
-		app.LogIt.Debug("checking" + entry.CIDR + " for existing blockings")
-		for ipaddrInt := entry.StartIPInt; ipaddrInt <= entry.EndIPInt; ipaddrInt++ {
-			if foundEntry, _ := FindBlacklistByIP(dbConn, ipaddrInt); foundEntry != nil {
-				if foundEntry.Name != poolName {
-					foundEntry.CheckedIP = helpers.Uint32ToIP(ipaddrInt)
-					foundEntries = append(foundEntries, *foundEntry)
-				}
-			}
-		}
+		app.LogIt.Error(fmt.Sprintf("Fehler bei der Konfliktprüfung für Pool %s: %v", poolName, err))
+		return nil, err
 	}
 	if foundEntries != nil {
 		return foundEntries, nil
@@ -539,6 +540,31 @@ func GetGroupStatus(dbConn *sql.DB, groupName string) (status string, found bool
 		return "", false, err
 	}
 	return status, true, nil
+}
+
+// GroupFullyAtStatus prüft, ob eine Gruppe UND alle ihre Pools bereits den
+// angegebenen Status haben - dann bewirkt eine erneute Block/Whitelist/
+// Deactivate-Aktion inhaltlich nichts und der teure Export+Apache-Reload kann
+// übersprungen werden. Wichtig für Aufrufer, die denselben API-Endpunkt
+// wiederholt aufrufen (z. B. ein Skript, das eine Gruppe blockt solange eine
+// Rate-Schwelle überschritten ist): ohne diese Prüfung würde jeder Aufruf
+// einen vollständigen Reload auslösen, obwohl sich am Ergebnis nichts ändert
+// - bei einem Apache-Reload von ~60s führt das zu einer nie endenden
+// Reload-Kette.
+func GroupFullyAtStatus(dbConn *sql.DB, groupName, status string) (bool, error) {
+	currentStatus, found, err := GetGroupStatus(dbConn, groupName)
+	if err != nil {
+		return false, err
+	}
+	if !found || currentStatus != status {
+		return false, nil
+	}
+	var mismatched int
+	row := dbConn.QueryRow(`SELECT COUNT(*) FROM pools WHERE group_name = ? AND status != ?`, groupName, status)
+	if err := row.Scan(&mismatched); err != nil {
+		return false, err
+	}
+	return mismatched == 0, nil
 }
 
 // SetGroupStatus setzt den Status einer Gruppe (legt sie bei Bedarf an).

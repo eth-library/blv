@@ -38,7 +38,6 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th scope="col">IP</th>
                 <th scope="col">Pool</th>
                 <th scope="col">CIDR</th>
                 <th scope="col">Kommentar</th>
@@ -47,7 +46,6 @@
             <tbody>
             {{ range .entries }}
               <tr>
-                <td>{{ .CheckedIP }}</td>
                 <td><a href="{{$.BasePath}}/admin/pools/{{ .Name }}">{{ .Name }}</a></td>
                 <td>{{ .CIDR }}</td>
                 <td>{{ .Comment }}</td>

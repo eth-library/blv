@@ -2,12 +2,14 @@ package functions
 
 import (
 	"bufio"
+	"context"
 	"database/sql"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	app "github.com/SvenKethz/fairdb/internal/configuration"
@@ -171,10 +173,27 @@ func ExportAllGroups(database *sql.DB, whitelistPath, blocklistPath string) erro
 	return nil
 }
 
+// reloadMu serialisiert Apache-Reloads: mehrere gleichzeitige Aktivierungen
+// (z. B. ein WebUI-Klick während ein API-Aufruf noch läuft, oder ein extern
+// wiederholt aufrufendes Skript) dürfen nicht mehrere parallele
+// "systemctl reload"-Prozesse anstoßen - das verlangsamt/verwirrt Apache nur
+// zusätzlich und lässt die Warteschlange weiter anwachsen.
+var reloadMu sync.Mutex
+
+// reloadTimeout begrenzt die maximale Wartezeit auf einen Apache-Reload. Ohne
+// dieses Limit blockiert ein hängender/sehr langsamer Reload den kompletten
+// HTTP-Request (WebUI oder API) unbegrenzt - das äußert sich für Aufrufer als
+// "hängendes" WebUI bzw. als Client-Timeout (z. B. curl rc=28), obwohl der
+// eigentliche DB-Export längst fertig ist.
+const reloadTimeout = 90 * time.Second
+
 // ReloadApache führt den konfigurierten Reload-Befehl aus (Default: sudo
 // systemctl reload apache2) und protokolliert Erfolg bzw. Fehler. Der
 // Service-User benötigt dafür ein entsprechendes NOPASSWD-sudoers-Recht,
-// siehe README.
+// siehe README. Läuft der Befehl länger als reloadTimeout, wird er
+// abgebrochen und ein Fehler zurückgegeben, statt den aufrufenden Request
+// unbegrenzt zu blockieren; parallele Aufrufe warten nacheinander statt
+// gleichzeitig mehrere Reload-Prozesse zu starten.
 func ReloadApache() error {
 	cmdArgs := app.Config.ApacheReloadCommand
 	if len(cmdArgs) == 0 {
@@ -182,8 +201,20 @@ func ReloadApache() error {
 		app.LogIt.Error(err.Error())
 		return err
 	}
-	cmd := exec.Command(cmdArgs[0], cmdArgs[1:]...)
+
+	reloadMu.Lock()
+	defer reloadMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), reloadTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, cmdArgs[0], cmdArgs[1:]...)
 	output, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		timeoutErr := fmt.Errorf("Apache-Reload nach %s abgebrochen (Timeout): %s", reloadTimeout, strings.Join(cmdArgs, " "))
+		app.LogIt.Error(timeoutErr.Error())
+		return timeoutErr
+	}
 	if err != nil {
 		app.LogIt.Error(fmt.Sprintf("Apache-Reload fehlgeschlagen (%s): %v - %s", strings.Join(cmdArgs, " "), err, strings.TrimSpace(string(output))))
 		return fmt.Errorf("Apache-Reload fehlgeschlagen: %w", err)
@@ -209,8 +240,16 @@ func ActivateGroup(database *sql.DB, groupName string) (wExported int, bExported
 // WhitelistGroup whitelisted alle Pools einer Gruppe (siehe db.WhitelistPool,
 // inkl. Konfliktprüfung gegen anderswo geblockte Einträge), setzt den
 // Gruppenstatus und aktiviert die Gruppe sofort (Export + Apache-Reload).
-// Werden Konflikte gefunden, bleibt die Gruppe unverändert.
+// Werden Konflikte gefunden, bleibt die Gruppe unverändert. Ist die Gruppe
+// bereits vollständig whitelisted, wird Export+Reload übersprungen (siehe
+// db.GroupFullyAtStatus) - wichtig für wiederholte Aufrufe (API, Skripte).
 func WhitelistGroup(database *sql.DB, groupName string) (conflicts []db.PoolEntry, wExported int, bExported int, err error, reloadErr error) {
+	if already, err := db.GroupFullyAtStatus(database, groupName, "w"); err != nil {
+		return nil, 0, 0, err, nil
+	} else if already {
+		app.LogIt.Debug("Gruppe " + groupName + " ist bereits vollständig whitelisted, überspringe Export/Reload")
+		return nil, 0, 0, nil, nil
+	}
 	poolNames, err := db.ListPoolNamesInGroup(database, groupName)
 	if err != nil {
 		return nil, 0, 0, err, nil
@@ -233,8 +272,20 @@ func WhitelistGroup(database *sql.DB, groupName string) (conflicts []db.PoolEntr
 }
 
 // BlockGroup blockt alle Pools einer Gruppe, setzt den Gruppenstatus und
-// aktiviert die Gruppe sofort (Export + Apache-Reload).
+// aktiviert die Gruppe sofort (Export + Apache-Reload). Ist die Gruppe
+// bereits vollständig geblockt, wird Export+Reload übersprungen (siehe
+// db.GroupFullyAtStatus) - wichtig für wiederholte Aufrufe (API, Skripte):
+// ohne diese Prüfung würde z. B. ein Rate-Limiting-Skript, das denselben
+// Endpunkt alle paar Sekunden aufruft, bei jedem Aufruf einen vollständigen
+// (u. U. ~60s dauernden) Apache-Reload auslösen und so eine endlose
+// Reload-Kette erzeugen.
 func BlockGroup(database *sql.DB, groupName string) (wExported int, bExported int, err error, reloadErr error) {
+	if already, err := db.GroupFullyAtStatus(database, groupName, "b"); err != nil {
+		return 0, 0, err, nil
+	} else if already {
+		app.LogIt.Debug("Gruppe " + groupName + " ist bereits vollständig geblockt, überspringe Export/Reload")
+		return 0, 0, nil, nil
+	}
 	poolNames, err := db.ListPoolNamesInGroup(database, groupName)
 	if err != nil {
 		return 0, 0, err, nil
@@ -253,8 +304,15 @@ func BlockGroup(database *sql.DB, groupName string) (wExported int, bExported in
 // DeactivateGroup setzt den Status aller Pools einer Gruppe zurück auf
 // inaktiv (weder whitelisted noch blocked) und aktiviert die Gruppe sofort
 // (Export + Apache-Reload) - die Gruppe verschwindet dadurch sowohl aus der
-// Whitelist- als auch der Blocklist-Datei.
+// Whitelist- als auch der Blocklist-Datei. Ist die Gruppe bereits vollständig
+// inaktiv, wird Export+Reload übersprungen (siehe db.GroupFullyAtStatus).
 func DeactivateGroup(database *sql.DB, groupName string) (wExported int, bExported int, err error, reloadErr error) {
+	if already, err := db.GroupFullyAtStatus(database, groupName, ""); err != nil {
+		return 0, 0, err, nil
+	} else if already {
+		app.LogIt.Debug("Gruppe " + groupName + " ist bereits vollständig inaktiv, überspringe Export/Reload")
+		return 0, 0, nil, nil
+	}
 	poolNames, err := db.ListPoolNamesInGroup(database, groupName)
 	if err != nil {
 		return 0, 0, err, nil
