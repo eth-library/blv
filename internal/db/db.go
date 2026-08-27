@@ -799,6 +799,18 @@ func UpsertAutoBlockSettings(dbConn *sql.DB, groupName string, enabled bool, thr
 	return err
 }
 
+// SetAutoBlockEnabled schaltet nur das enabled-Flag einer bereits
+// bestehenden AutoBlock-Konfiguration um, ohne Schwellwert/Blockdauer zu
+// berühren. Existiert noch keine Konfiguration für die Gruppe, ist der
+// Aufruf ein No-op (0 betroffene Zeilen, kein Fehler) - Fallback für den
+// Fall "Formular deaktivieren, aber keine gültigen neuen Werte übermittelt"
+// (siehe webserver.go), wo Manager.Save mangels validierter Werte nicht
+// aufgerufen werden kann.
+func SetAutoBlockEnabled(dbConn *sql.DB, groupName string, enabled bool) error {
+	_, err := dbConn.Exec(`UPDATE group_autoblock SET enabled = ? WHERE group_name = ?`, boolToInt(enabled), groupName)
+	return err
+}
+
 // SetAutoBlockActive markiert eine Gruppe als gerade automatisch geblockt,
 // bis spätestens 'until' (siehe autoblock.Manager). Setzt voraus, dass für
 // die Gruppe bereits eine Zeile existiert (siehe UpsertAutoBlockSettings).

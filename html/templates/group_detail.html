@@ -142,7 +142,8 @@
           </div>
           <div class="field-group">
             <label for="abThreshold">Schwellwert (Ø req/s)</label>
-            <input type="number" step="0.01" min="0.01" id="abThreshold" name="thresholdRPS" value="{{ if .autoBlockSettings }}{{ .autoBlockSettings.ThresholdRPS }}{{ end }}">
+            <input type="number" step="0.01" min="0.01" id="abThreshold" name="thresholdRPS" value="{{ if .autoBlockSettings }}{{ .autoBlockSettings.ThresholdRPS }}{{ end }}" oninput="fairdbUpdateAutoBlockRange()">
+            <span class="hint" id="abThresholdRange"></span>
           </div>
           <div class="field-group">
             <label for="abMin">Blockdauer min (s)</label>
@@ -155,6 +156,25 @@
           <button type="submit">Speichern</button>
           </fieldset>
         </form>
+        <script>
+          (function () {
+            var variancePercent = {{ .autoBlockVariancePercent }};
+            window.fairdbUpdateAutoBlockRange = function () {
+              var input = document.getElementById('abThreshold');
+              var out = document.getElementById('abThresholdRange');
+              var value = parseFloat(input.value);
+              if (!isFinite(value) || value <= 0) {
+                out.textContent = '';
+                return;
+              }
+              var factor = variancePercent / 100;
+              var low = value * (1 - factor);
+              var high = value * (1 + factor);
+              out.textContent = 'pendelt bei jeder Prüfung zwischen ' + low.toFixed(2) + ' und ' + high.toFixed(2) + ' req/s (±' + variancePercent + '%)';
+            };
+            fairdbUpdateAutoBlockRange();
+          })();
+        </script>
       </section>
       {{ end }}
 

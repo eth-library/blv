@@ -227,6 +227,13 @@ autoBlock:
 Ein leerer `statusURL` deaktiviert das Feature komplett (kein Overhead, keine
 Gruppen-Karte im WebUI).
 
+Zeigt `statusURL` per HTTPS auf `localhost` oder eine Loopback-Adresse
+(127.0.0.0/8, `::1`) - in der Praxis häufig mit einem nicht validen/
+selbstsignierten Zertifikat, da diese Verbindung nie das System verlässt -,
+deaktiviert fairDB die TLS-Zertifikatsprüfung für diese Anfrage (wie
+`curl -k`) und loggt das einmalig als Warnung. Für jeden anderen Host bleibt
+die normale Zertifikatsprüfung aktiv.
+
 **Verhältnis von Messzeitraum (x) und Messintervall (y):** Bei jedem Tick
 (alle y Sekunden) wird der gleitende x-Minuten-Durchschnitt neu berechnet und
 sofort geprüft - y bestimmt also, wie schnell reagiert wird, x bestimmt, wie

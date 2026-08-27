@@ -8,8 +8,11 @@ package autoblock
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -61,11 +64,22 @@ func NewRateMonitorWithWindow(cfg app.AutoBlockConfig, window time.Duration) *Ra
 }
 
 func newRateMonitor(statusURL string, interval, window time.Duration) *RateMonitor {
+	client := &http.Client{Timeout: 5 * time.Second}
+	if isInsecureLocalStatusURL(statusURL) {
+		// In der Praxis läuft server-status häufig auf localhost mit einem
+		// nicht validen/selbstsignierten Zertifikat (nie über das Netz
+		// erreichbar). Statt hart zu scheitern, verhalten wir uns wie
+		// "curl -k" - das Ziel ist ausschließlich der lokale Apache, kein
+		// MITM-Risiko wie bei einem Remote-Host. Einmalig geloggt, damit die
+		// eigentlich saubere Lösung (gültiges Zertifikat) sichtbar bleibt.
+		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+		app.LogIt.Warn(fmt.Sprintf("AutoBlock: %s zeigt per HTTPS auf localhost/loopback - TLS-Zertifikatsprüfung wird wie bei 'curl -k' deaktiviert. Bitte Apache mit einem gültigen Zertifikat konfigurieren, sobald möglich.", statusURL))
+	}
 	m := &RateMonitor{
 		statusURL: statusURL,
 		interval:  interval,
 		window:    window,
-		client:    &http.Client{Timeout: 5 * time.Second},
+		client:    client,
 	}
 	m.latest.Store(&Snapshot{Healthy: false})
 	return m
@@ -168,4 +182,22 @@ func (m *RateMonitor) fetchTotalAccesses() (int64, error) {
 		return 0, err
 	}
 	return 0, fmt.Errorf("Feld 'Total Accesses' nicht gefunden")
+}
+
+// isInsecureLocalStatusURL erkennt eine HTTPS-URL, die auf "localhost" oder
+// eine Loopback-Adresse (127.0.0.0/8, ::1) zeigt - dafür wird die
+// TLS-Zertifikatsprüfung bewusst deaktiviert (siehe newRateMonitor). Für
+// jeden anderen Host (auch andere private/interne Adressen) bleibt die
+// normale Zertifikatsprüfung aktiv, um kein MITM-Risiko einzugehen.
+func isInsecureLocalStatusURL(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Scheme != "https" {
+		return false
+	}
+	host := u.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

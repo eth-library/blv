@@ -62,48 +62,67 @@ func (m *Manager) StartAll() error {
 	return nil
 }
 
-// Enable speichert die AutoBlock-Konfiguration einer Gruppe und (re-)startet
-// ihre Überwachungs-Goroutine, falls sie nicht schon läuft. Es darf immer nur
-// eine Gruppe gleichzeitig AutoBlock aktiviert haben (die Ratenmessung ist
-// serverweit und unterscheidet nicht zwischen Gruppen, siehe
-// db.GetEnabledAutoBlockGroup) - für jede andere Gruppe wird Enable
-// abgelehnt. idx_group_autoblock_singleton_enabled (siehe db.CreateTables)
-// erzwingt das zusätzlich hart in der DB, falls zwei Admin-Requests diese
-// Prüfung gleichzeitig passieren.
-func (m *Manager) Enable(groupName string, thresholdRPS float64, minSeconds, maxSeconds int) error {
-	existing, found, err := db.GetEnabledAutoBlockGroup(m.database)
-	if err != nil {
+// Save persistiert die vom Admin im WebUI eingegebene AutoBlock-Konfiguration
+// einer Gruppe (immer, unabhängig von enabled - siehe unten) und
+// startet/stoppt ihre Überwachungs-Goroutine entsprechend.
+//
+// Wichtig: die Werte werden auch dann gespeichert, wenn enabled=false ist.
+// Eine frühere Version speicherte beim Deaktivieren nur den enabled-Flag und
+// verwarf die im selben Formular eingegebenen Schwellwerte/Blockdauern
+// stillschweigend - im Extremfall (erstes Speichern einer Gruppe mit noch
+// nicht gesetzter "aktiviert"-Checkbox) landete dadurch gar keine Zeile in
+// der DB und das Formular erschien beim nächsten Aufruf leer. Save
+// vereinheitlicht das: es gibt keinen separaten "nur Werte merken,
+// ohne zu (de)aktivieren"-Pfad mehr.
+//
+// Es darf immer nur eine Gruppe gleichzeitig AutoBlock aktiviert haben (die
+// Ratenmessung ist serverweit und unterscheidet nicht zwischen Gruppen,
+// siehe db.GetEnabledAutoBlockGroup) - der Versuch, eine zweite Gruppe zu
+// aktivieren, wird abgelehnt. idx_group_autoblock_singleton_enabled (siehe
+// db.CreateTables) erzwingt das zusätzlich hart in der DB, falls zwei
+// Admin-Requests diese Prüfung gleichzeitig passieren.
+func (m *Manager) Save(groupName string, enabled bool, thresholdRPS float64, minSeconds, maxSeconds int) error {
+	if enabled {
+		existing, found, err := db.GetEnabledAutoBlockGroup(m.database)
+		if err != nil {
+			return err
+		}
+		if found && existing != groupName {
+			return fmt.Errorf("AutoBlock ist bereits für Gruppe %q aktiviert - es darf immer nur eine Gruppe gleichzeitig aktiv sein", existing)
+		}
+	} else if err := m.stopAndRevertIfActive(groupName); err != nil {
 		return err
 	}
-	if found && existing != groupName {
-		return fmt.Errorf("AutoBlock ist bereits für Gruppe %q aktiviert - es darf immer nur eine Gruppe gleichzeitig aktiv sein", existing)
-	}
-	if err := db.UpsertAutoBlockSettings(m.database, groupName, true, thresholdRPS, minSeconds, maxSeconds); err != nil {
+
+	if err := db.UpsertAutoBlockSettings(m.database, groupName, enabled, thresholdRPS, minSeconds, maxSeconds); err != nil {
 		return err
 	}
-	m.start(groupName)
+	if enabled {
+		m.start(groupName)
+	}
 	return nil
 }
 
-// Disable stoppt die Überwachungs-Goroutine und deaktiviert die Einstellung
-// (die Schwellwerte bleiben für ein späteres erneutes Enable erhalten). Ist
-// die Gruppe gerade automatisch geblockt, wird sie zuerst zurückgesetzt -
-// sonst bliebe sie für immer geblockt, weil ihr eigener Revert-Timer mit der
-// gestoppten Goroutine stirbt.
-func (m *Manager) Disable(groupName string) error {
-	m.stop(groupName)
+// Stop beendet die Überwachungs-Goroutine einer Gruppe sofort und setzt einen
+// gerade laufenden automatischen Block zurück, OHNE die gespeicherte
+// Konfiguration zu verändern. Für Aufrufer ohne neu eingegebene
+// Formularwerte, die nichts zu speichern haben - aktuell die
+// Gruppenlöschung (siehe webserver.go), die die AutoBlock-Zeile ohnehin
+// direkt im Anschluss löscht.
+func (m *Manager) Stop(groupName string) error {
+	return m.stopAndRevertIfActive(groupName)
+}
 
+func (m *Manager) stopAndRevertIfActive(groupName string) error {
+	m.stop(groupName)
 	settings, err := db.GetAutoBlockSettings(m.database, groupName)
 	if err != nil {
 		return err
 	}
-	if settings == nil {
-		return nil
-	}
-	if settings.Active {
+	if settings != nil && settings.Active {
 		m.revert(groupName)
 	}
-	return db.UpsertAutoBlockSettings(m.database, groupName, false, settings.ThresholdRPS, settings.BlockDurationMinSeconds, settings.BlockDurationMaxSeconds)
+	return nil
 }
 
 func (m *Manager) start(groupName string) {

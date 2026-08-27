@@ -76,6 +76,7 @@ func addAutoBlockContext(ctx gin.H, database *sql.DB, autoBlockManager *autobloc
 	}
 	ctx["autoBlockAvailable"] = true
 	ctx["autoBlockMonitor"] = autoBlockManager.Monitor().Latest()
+	ctx["autoBlockVariancePercent"] = app.Config.AutoBlock.ThresholdVariancePercent
 	settings, err := db.GetAutoBlockSettings(database, groupName)
 	if err != nil {
 		app.LogIt.Debug(fmt.Sprintf("Fehler beim Laden der AutoBlock-Einstellung für %s: %v", groupName, err))
@@ -431,39 +432,59 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 			// Läuft gerade eine AutoBlock-Überwachung für diese Gruppe, muss
 			// sie gestoppt werden, bevor die Gruppe verschwindet (siehe
 			// DeleteGroup, das auch die AutoBlock-Einstellung mit löscht).
-			_ = autoBlockManager.Disable(groupName)
+			_ = autoBlockManager.Stop(groupName)
 		}
 		_ = db.DeleteGroup(database, groupName)
 		c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups")
 	})
 
-	// AutoBlock einer Gruppe konfigurieren/aktivieren/deaktivieren
+	// AutoBlock einer Gruppe konfigurieren/aktivieren/deaktivieren. Die
+	// eingegebenen Werte (Schwellwert, Blockdauer-Spanne) werden immer
+	// gespeichert, auch beim Deaktivieren - sonst würden beim ersten
+	// Speichern einer noch nicht aktivierten Gruppe (Checkbox unangetastet)
+	// die eingegebenen Werte stillschweigend verworfen und das Formular
+	// erschiene beim nächsten Aufruf leer.
 	admin.POST("/groups/:name/autoblock", func(c *gin.Context) {
 		groupName := c.Param("name")
 		if autoBlockManager == nil {
 			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape("AutoBlock ist nicht konfiguriert (kein statusURL in der fairDB-Config)"))
 			return
 		}
-		if c.PostForm("enabled") == "" {
-			if err := autoBlockManager.Disable(groupName); err != nil {
+		enabled := c.PostForm("enabled") != ""
+		thresholdRPS, errT := strconv.ParseFloat(strings.TrimSpace(c.PostForm("thresholdRPS")), 64)
+		minSeconds, errMin := strconv.Atoi(strings.TrimSpace(c.PostForm("blockDurationMinSeconds")))
+		maxSeconds, errMax := strconv.Atoi(strings.TrimSpace(c.PostForm("blockDurationMaxSeconds")))
+		valid := errT == nil && errMin == nil && errMax == nil && thresholdRPS > 0 && minSeconds > 0 && maxSeconds >= minSeconds
+
+		if !valid {
+			if enabled {
+				c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape("Ungültige AutoBlock-Werte (Schwellwert > 0, 0 < Blockdauer-Min <= Blockdauer-Max erforderlich)"))
+				return
+			}
+			// Deaktivieren ohne gültige neue Werte (z. B. Formular manuell
+			// geleert): bestehende Konfiguration unangetastet lassen, nur
+			// stoppen/zurücksetzen und den enabled-Flag umschalten.
+			if err := autoBlockManager.Stop(groupName); err != nil {
+				c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape(err.Error()))
+				return
+			}
+			if err := db.SetAutoBlockEnabled(database, groupName, false); err != nil {
 				c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape(err.Error()))
 				return
 			}
 			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?message="+url.QueryEscape("AutoBlock deaktiviert."))
 			return
 		}
-		thresholdRPS, errT := strconv.ParseFloat(strings.TrimSpace(c.PostForm("thresholdRPS")), 64)
-		minSeconds, errMin := strconv.Atoi(strings.TrimSpace(c.PostForm("blockDurationMinSeconds")))
-		maxSeconds, errMax := strconv.Atoi(strings.TrimSpace(c.PostForm("blockDurationMaxSeconds")))
-		if errT != nil || errMin != nil || errMax != nil || thresholdRPS <= 0 || minSeconds <= 0 || maxSeconds < minSeconds {
-			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape("Ungültige AutoBlock-Werte (Schwellwert > 0, 0 < Blockdauer-Min <= Blockdauer-Max erforderlich)"))
-			return
-		}
-		if err := autoBlockManager.Enable(groupName, thresholdRPS, minSeconds, maxSeconds); err != nil {
+
+		if err := autoBlockManager.Save(groupName, enabled, thresholdRPS, minSeconds, maxSeconds); err != nil {
 			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape(err.Error()))
 			return
 		}
-		c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?message="+url.QueryEscape("AutoBlock aktiviert."))
+		message := "AutoBlock deaktiviert."
+		if enabled {
+			message = "AutoBlock aktiviert."
+		}
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?message="+url.QueryEscape(message))
 	})
 
 	// Pool einer Gruppe zuweisen
