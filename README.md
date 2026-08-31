@@ -205,16 +205,22 @@ Optional lässt sich mit `-F "zielStatus=b"` bzw. `-F "zielStatus=w"` der
 Status jedes importierten Eintrags direkt mitgeben.
 
 ## AutoBlock (automatischer Scraping-Schutz)
+Pro Gruppe wählbar zwischen zwei Modi: **Schwellwert-basiert** (reagiert auf
+eine gemessene serverweite Requestrate, siehe unten) und **Scraper's Pain**
+(blockt fortlaufend einen zufälligen Teil der Gruppen-Pools, ohne jede
+Ratenmessung - siehe eigener Abschnitt weiter unten).
+
+### Schwellwert-basiert
 fairDB sitzt nicht im Request-Pfad (es erzeugt nur `Require [not] ip`-
 Direktiven, die Apache selbst auswertet) und hat daher keine eigene Sicht auf
 tatsächliche Requests. Als Datenquelle pollt fairDB stattdessen periodisch
 Apaches `mod_status` (`server-status?auto`) und berechnet daraus die
 serverweite (nicht pro Gruppe/IP) Requestrate:
 `RPS ≈ (TotalAccesses[n] − TotalAccesses[n−1]) / Δt`. Jede Gruppe mit
-aktiviertem AutoBlock entscheidet unabhängig anhand ihres eigenen,
+aktiviertem Schwellwert-Modus entscheidet unabhängig anhand ihres eigenen,
 randomisierten Schwellwerts, ob *sie* sich deswegen selbst temporär blockt -
-das AutoBlock-Ziel ist ausdrücklich **kein** Schutz vor kurzen Peaks, sondern
-gegen länger andauerndes Scraping.
+das Ziel ist ausdrücklich **kein** Schutz vor kurzen Peaks, sondern gegen
+länger andauerndes Scraping.
 
 Globale Einstellungen in `fairdb.yml` (Abschnitt `autoBlock`):
 ```yaml
@@ -224,8 +230,9 @@ autoBlock:
   measureWindowMinutes: 10     # x: gleitendes Zeitfenster des Durchschnitts
   thresholdVariancePercent: 30 # +- Zufallsanteil auf den je Gruppe konfigurierten Schwellwert
 ```
-Ein leerer `statusURL` deaktiviert das Feature komplett (kein Overhead, keine
-Gruppen-Karte im WebUI).
+Ein leerer `statusURL` deaktiviert nur den Schwellwert-Modus (kein Overhead,
+die Option ist im WebUI ausgegraut) - Scraper's Pain bleibt davon unberührt
+verfügbar, da es keine Ratenmessung braucht.
 
 Zeigt `statusURL` per HTTPS auf `localhost` oder eine Loopback-Adresse
 (127.0.0.0/8, `::1`) - in der Praxis häufig mit einem nicht validen/
@@ -254,20 +261,24 @@ Y Minuten erfasst" (normale Aufwärmphase - direkt nach dem Start bzw. nach
 einem Zähler-Reset von Apache dauert es bis zu `measureWindowMinutes` Minuten,
 bis genug Daten für einen verlässlichen Durchschnitt vorliegen).
 
-**Pro Gruppe** (Gruppen-Detailseite im Admin-Bereich): AutoBlock aktivieren
-mit Schwellwert (Ø req/s, ganzzahlig eingegeben, wird bei jeder Prüfung
-zusätzlich um `thresholdVariancePercent` verzerrt) und einer Blockdauer-Spanne
-(min/max in Minuten, bei Auslösung wird eine zufällige Dauer daraus gewählt).
-Intern (DB, Auswertung) wird die Blockdauer weiterhin in Sekunden gehalten -
-die Umrechnung erfolgt ausschließlich an der WebUI-Formulargrenze.
+**Pro Gruppe** (Gruppen-Detailseite im Admin-Bereich): Schwellwert-Modus
+aktivieren mit Schwellwert (Ø req/s, ganzzahlig eingegeben, wird bei jeder
+Prüfung zusätzlich um `thresholdVariancePercent` verzerrt) und einer
+Blockdauer-Spanne (min/max in Minuten, bei Auslösung wird eine zufällige
+Dauer daraus gewählt). Intern (DB, Auswertung) wird die Blockdauer
+weiterhin in Sekunden gehalten - die Umrechnung erfolgt ausschließlich an
+der WebUI-Formulargrenze.
 
-Da die Ratenmessung serverweit ist und nicht zwischen Gruppen unterscheidet,
-darf **immer nur eine einzige Gruppe gleichzeitig** AutoBlock aktiviert
-haben - sonst würden mehrere Gruppen unabhängig auf dasselbe Lastsignal
-reagieren. Ist AutoBlock bereits für eine andere Gruppe aktiviert, ist das
-Formular auf der Gruppenseite ausgegraut; erst nach dem Deaktivieren dort
-lässt sich AutoBlock für eine andere Gruppe aktivieren. Das wird zusätzlich
-auf DB-Ebene hart erzwungen (`idx_group_autoblock_singleton_enabled`).
+Egal welcher Modus: es darf **immer nur eine einzige Gruppe gleichzeitig**
+AutoBlock aktiviert haben. Im Schwellwert-Modus, weil die Ratenmessung
+serverweit ist und nicht zwischen Gruppen unterscheidet - sonst würden
+mehrere Gruppen unabhängig auf dasselbe Lastsignal reagieren; dieselbe Regel
+gilt bewusst auch für Scraper's Pain, um die Zahl gleichzeitig laufender
+Zufallszyklen und damit einhergehender Apache-Reloads zu begrenzen. Ist
+AutoBlock bereits für eine andere Gruppe aktiviert, ist das Formular auf der
+Gruppenseite ausgegraut; erst nach dem Deaktivieren dort lässt sich AutoBlock
+für eine andere Gruppe aktivieren. Das wird zusätzlich auf DB-Ebene hart
+erzwungen (`idx_group_autoblock_singleton_enabled`).
 
 Eine explizit **whitelisted** Gruppe wird nie automatisch geblockt. Läuft eine
 manuelle Whitelist-/Block-/Deaktivierungs-Aktion (WebUI oder API), wird ein
@@ -276,6 +287,29 @@ die manuelle Entscheidung später nicht überschreibt. Beim Deaktivieren von
 AutoBlock für eine gerade automatisch geblockte Gruppe wird sofort
 zurückgesetzt (Export + Apache-Reload), damit die Gruppe nicht dauerhaft
 geblockt bleibt.
+
+### Scraper's Pain
+Statt auf eine Ratenmessung zu reagieren, blockiert dieser Modus fortlaufend
+einen zufälligen Teil der Pools einer Gruppe: bei jedem Zyklus wird ein
+zufälliger Anteil der Pools ausgewählt (**Umfang**, 1-100 %, bezogen auf die
+Pools der Gruppe zum jeweiligen Zeitpunkt) und für eine zufällige Dauer aus
+der (mit dem Schwellwert-Modus geteilten) Blockdauer-Spanne min/max
+geblockt. Läuft die Dauer ab, wird sofort eine neue Auswahl im gleichen
+Umfang und eine neue zufällige Dauer gewürfelt - ohne Pause dazwischen -, bis
+der Modus wieder deaktiviert wird. Anders als der Schwellwert-Modus
+funktioniert Scraper's Pain unabhängig von einer konfigurierten `statusURL`.
+
+Individuell **whitelistete** Pools (Pool-Status `w`) werden nie in die
+Zufallsauswahl einbezogen, auch wenn sie formal zur Gruppe gehören - analog
+dazu, dass eine whitelistete Gruppe im Schwellwert-Modus nie automatisch
+geblockt wird. Der Gruppenstatus selbst bleibt während Scraper's Pain
+durchgängig inaktiv (`""`); nur einzelne Pools wechseln zwischen geblockt und
+inaktiv, die Gruppen-Detailseite zeigt das als "gemischt/inaktiv" mit den
+aktuell geblockten Pools separat aufgelistet.
+
+Sehr kurze Blockdauern (wenige Sekunden/Minuten) führen zu entsprechend
+häufigen Export- und Apache-Reload-Vorgängen - für den produktiven Einsatz
+empfiehlt sich eine Blockdauer-Spanne im Minuten- bis Stunden-Bereich.
 
 ## API
 Ein Bearer-Auth-geschütztes JSON-API steht unter `/api/v1` bereit (Token

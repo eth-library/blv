@@ -78,18 +78,22 @@ func main() {
 			log.Fatalf("Fehler beim Abgleich mit der Apache-Konfiguration: %v", err)
 		}
 
-		var autoBlockManager *autoblock.Manager
+		// Der Manager wird immer erzeugt - Scraper's Pain braucht anders als
+		// der Schwellwert-Modus keine Ratenmessung und soll auch ohne
+		// konfigurierte statusURL nutzbar sein. Der RateMonitor bleibt
+		// weiterhin optional (nil), Manager.Save lehnt ModeThreshold dann ab.
+		var ctx = context.Background()
+		var monitor *autoblock.RateMonitor
 		if app.Config.AutoBlock.StatusURL == "" {
-			app.LogIt.Info("AutoBlock deaktiviert (kein statusURL konfiguriert)")
+			app.LogIt.Info("Schwellwert-basierter AutoBlock deaktiviert (kein statusURL konfiguriert) - Scraper's Pain bleibt verfügbar")
 		} else {
 			app.LogIt.Info("AutoBlock aktiv, starte Ratenmessung gegen " + app.Config.AutoBlock.StatusURL)
-			monitor := autoblock.NewRateMonitor(app.Config.AutoBlock)
-			ctx := context.Background()
+			monitor = autoblock.NewRateMonitor(app.Config.AutoBlock)
 			go monitor.Run(ctx)
-			autoBlockManager = autoblock.NewManager(ctx, database, monitor, app.Config.AutoBlock)
-			if err := autoBlockManager.StartAll(); err != nil {
-				log.Fatalf("Fehler beim Starten der AutoBlock-Überwachung: %v", err)
-			}
+		}
+		autoBlockManager := autoblock.NewManager(ctx, database, monitor, app.Config.AutoBlock)
+		if err := autoBlockManager.StartAll(); err != nil {
+			log.Fatalf("Fehler beim Starten der AutoBlock-Überwachung: %v", err)
 		}
 
 		r := webserver.NewRouter(database, app.Config.BasePath, autoBlockManager)

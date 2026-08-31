@@ -32,14 +32,21 @@
       <div class="grid">
         <div class="grid-left">
 
-          {{ if .autoBlockAvailable }}
           <section class="card">
             <h3>Automatischer Block (Scraping-Schutz)</h3>
             <p class="hint">
-              Blockt diese Gruppe automatisch temporär, wenn der gemessene
-              serverweite Ø-Requests/s über einen längeren Zeitraum den Schwellwert
+              Zwei Modi zur Wahl: <strong>Schwellwert-basiert</strong> blockt diese
+              Gruppe automatisch temporär, wenn der gemessene serverweite
+              Ø-Requests/s über einen längeren Zeitraum den Schwellwert
               überschreitet (mit Zufallsanteil, siehe README).
+              <strong>Scraper's Pain</strong> blockt fortlaufend einen
+              zufälligen Teil der Pools dieser Gruppe (Umfang in %) für eine
+              zufällige Dauer und würfelt nach jedem Ablauf sofort eine neue
+              Auswahl - ohne Ratenmessung, bis der Modus wieder deaktiviert wird.
             </p>
+            {{ if not .autoBlockMonitorAvailable }}
+              <p class="hint">Schwellwert-basierter Block ist nicht verfügbar (keine statusURL in der fairDB-Config) - Scraper's Pain funktioniert unabhängig davon.</p>
+            {{ end }}
             {{ with .autoBlockMonitor }}
               <p>
                 Aktuelle Messung: Ø {{ printf "%.2f" .AvgRPS }} req/s
@@ -54,21 +61,39 @@
             {{ end }}
             {{ with .autoBlockSettings }}
               {{ if .Enabled }}
-                <p>
-                  AutoBlock ist <strong>aktiviert</strong> (Schwellwert {{ printf "%.0f" .ThresholdRPS }} req/s,
-                  Blockdauer {{ $.autoBlockMinMinutes }}-{{ $.autoBlockMaxMinutes }} Minuten).
-                  {{ if .Active }}
-                    Aktuell automatisch geblockt{{ if .TriggeredUntil }} bis {{ .TriggeredUntil.Format "2006-01-02 15:04:05" }}{{ end }}.
-                  {{ end }}
-                </p>
+                {{ if eq .Mode $.autoBlockModeScraperPain }}
+                  <p>
+                    <strong>Scraper's Pain</strong> ist aktiviert (Umfang {{ .ScraperPainPercent }} % der Pools,
+                    Blockdauer {{ $.autoBlockMinMinutes }}-{{ $.autoBlockMaxMinutes }} Minuten).
+                    {{ if .Active }}
+                      Aktuell {{ len $.scraperPainActivePools }} Pool(s) geblockt{{ if .TriggeredUntil }}, nächste Neuauswahl um {{ .TriggeredUntil.Format "2006-01-02 15:04:05" }}{{ end }}.
+                      {{ if $.scraperPainActivePools }}
+                        <details>
+                          <summary>Aktuell geblockte Pools anzeigen</summary>
+                          <ul>
+                            {{ range $.scraperPainActivePools }}<li>{{ . }}</li>{{ end }}
+                          </ul>
+                        </details>
+                      {{ end }}
+                    {{ end }}
+                  </p>
+                {{ else }}
+                  <p>
+                    AutoBlock (Schwellwert-basiert) ist <strong>aktiviert</strong> (Schwellwert {{ printf "%.0f" .ThresholdRPS }} req/s,
+                    Blockdauer {{ $.autoBlockMinMinutes }}-{{ $.autoBlockMaxMinutes }} Minuten).
+                    {{ if .Active }}
+                      Aktuell automatisch geblockt{{ if .TriggeredUntil }} bis {{ .TriggeredUntil.Format "2006-01-02 15:04:05" }}{{ end }}.
+                    {{ end }}
+                  </p>
+                {{ end }}
               {{ end }}
             {{ end }}
             {{ if .autoBlockLockedBy }}
               <div class="alert alert-error">
                 AutoBlock ist bereits für Gruppe
                 <a href="{{ $.BasePath }}/admin/groups/{{ .autoBlockLockedBy }}">{{ .autoBlockLockedBy }}</a>
-                aktiviert - es darf immer nur eine Gruppe gleichzeitig aktiv sein.
-                Erst dort deaktivieren, um AutoBlock hier zu aktivieren.
+                aktiviert - es darf immer nur eine Gruppe gleichzeitig aktiv sein
+                (egal welcher Modus). Erst dort deaktivieren, um AutoBlock hier zu aktivieren.
               </div>
             {{ end }}
             <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/autoblock">
@@ -80,9 +105,23 @@
                 </label>
               </div>
               <div class="field-group">
+                <label>
+                  <input type="radio" name="mode" value="{{ .autoBlockModeThreshold }}" id="abModeThreshold" {{ if not .autoBlockMonitorAvailable }}disabled{{ end }} {{ if or (not .autoBlockSettings) (eq .autoBlockSettings.Mode .autoBlockModeThreshold) }}checked{{ end }} onchange="fairdbUpdateAutoBlockMode()">
+                  Schwellwert-basiert
+                </label>
+                <label>
+                  <input type="radio" name="mode" value="{{ .autoBlockModeScraperPain }}" id="abModeScraperPain" {{ if and .autoBlockSettings (eq .autoBlockSettings.Mode .autoBlockModeScraperPain) }}checked{{ end }} onchange="fairdbUpdateAutoBlockMode()">
+                  Scraper's Pain
+                </label>
+              </div>
+              <div class="field-group" id="abThresholdGroup">
                 <label for="abThreshold">Schwellwert (Ø req/s)</label>
                 <input type="number" step="1" min="1" id="abThreshold" name="thresholdRPS" value="{{ if .autoBlockSettings }}{{ printf "%.0f" .autoBlockSettings.ThresholdRPS }}{{ end }}" oninput="fairdbUpdateAutoBlockRange()">
                 <span class="hint" id="abThresholdRange"></span>
+              </div>
+              <div class="field-group" id="abScraperPainGroup">
+                <label for="abScraperPainPercent">Umfang (% der Pools)</label>
+                <input type="number" step="1" min="1" max="100" id="abScraperPainPercent" name="scraperPainPercent" value="{{ if .autoBlockSettings }}{{ .autoBlockSettings.ScraperPainPercent }}{{ end }}">
               </div>
               <div class="field-group">
                 <label for="abMin">Blockdauer min (Minuten)</label>
@@ -111,11 +150,16 @@
                   var high = value * (1 + factor);
                   out.textContent = 'pendelt bei jeder Prüfung zwischen ' + low.toFixed(0) + ' und ' + high.toFixed(0) + ' req/s (±' + variancePercent + '%)';
                 };
+                window.fairdbUpdateAutoBlockMode = function () {
+                  var scraperPain = document.getElementById('abModeScraperPain').checked;
+                  document.getElementById('abThresholdGroup').style.display = scraperPain ? 'none' : '';
+                  document.getElementById('abScraperPainGroup').style.display = scraperPain ? '' : 'none';
+                };
                 fairdbUpdateAutoBlockRange();
+                fairdbUpdateAutoBlockMode();
               })();
             </script>
           </section>
-          {{ end }}
 
           <section class="card">
             <h3>Pool dieser Gruppe zuweisen</h3>
@@ -177,7 +221,7 @@
           </section>
 
           <section class="card">
-            <h3>Pools in dieser Gruppe</h3>
+            <h3>{{ len .pools }} Pools in dieser Gruppe</h3>
             <div class="table-wrapper">
               <table class="data-table">
                 <thead>
@@ -195,6 +239,7 @@
                       {{ else if eq .Status "b" }} blocked
                       {{ else }} gemischt/inaktiv
                       {{ end }}
+                      {{ if .ScraperPainActive }} <span class="hint">(Scraper's Pain)</span>{{ end }}
                     </td>
                   </tr>
                 {{ else }}

@@ -13,11 +13,22 @@ import (
 	"github.com/SvenKethz/fairdb/internal/functions"
 )
 
+// ModeThreshold und ModeScraperPain sind die beiden Werte, die
+// db.AutoBlockSettings.Mode annehmen kann - siehe evaluate/evaluateScraperPain.
+const (
+	ModeThreshold   = "threshold"
+	ModeScraperPain = "scraperspain"
+)
+
 // Manager startet und verwaltet pro Gruppe mit aktiviertem AutoBlock eine
-// eigene, langlebige Goroutine, die in regelmäßigen Abständen den RateMonitor
-// abfragt und über functions.BlockGroup/DeactivateGroup entscheidet (siehe
-// Plan "AutoBlock: Scraping-Erkennung über Apache mod_status"). Eine Instanz
-// pro fairDB-Prozess, siehe main.go.
+// eigene, langlebige Goroutine. Je nach gewähltem Modus (siehe
+// db.AutoBlockSettings.Mode) wertet ein Tick entweder den RateMonitor gegen
+// den Schwellwert aus (ModeThreshold, siehe Plan "AutoBlock:
+// Scraping-Erkennung über Apache mod_status") oder betreibt einen endlosen
+// Zufallsauswahl-Zyklus über einen Teil der Gruppen-Pools (ModeScraperPain).
+// Eine Instanz pro fairDB-Prozess, siehe main.go. monitor ist nil, wenn keine
+// statusURL konfiguriert ist - ModeThreshold ist dann nicht nutzbar (siehe
+// Save), ModeScraperPain funktioniert unabhängig davon.
 type Manager struct {
 	rootCtx         context.Context
 	database        *sql.DB
@@ -41,7 +52,7 @@ func NewManager(ctx context.Context, database *sql.DB, monitor *RateMonitor, cfg
 }
 
 // Monitor gibt den zugrundeliegenden RateMonitor zurück (z. B. für die
-// Statusanzeige im WebUI).
+// Statusanzeige im WebUI), oder nil, wenn keine statusURL konfiguriert ist.
 func (m *Manager) Monitor() *RateMonitor {
 	return m.monitor
 }
@@ -75,14 +86,21 @@ func (m *Manager) StartAll() error {
 // vereinheitlicht das: es gibt keinen separaten "nur Werte merken,
 // ohne zu (de)aktivieren"-Pfad mehr.
 //
-// Es darf immer nur eine Gruppe gleichzeitig AutoBlock aktiviert haben (die
-// Ratenmessung ist serverweit und unterscheidet nicht zwischen Gruppen,
-// siehe db.GetEnabledAutoBlockGroup) - der Versuch, eine zweite Gruppe zu
-// aktivieren, wird abgelehnt. idx_group_autoblock_singleton_enabled (siehe
-// db.CreateTables) erzwingt das zusätzlich hart in der DB, falls zwei
-// Admin-Requests diese Prüfung gleichzeitig passieren.
-func (m *Manager) Save(groupName string, enabled bool, thresholdRPS float64, minSeconds, maxSeconds int) error {
+// Es darf immer nur eine Gruppe gleichzeitig AutoBlock aktiviert haben,
+// unabhängig vom Modus (im Schwellwert-Modus, weil die Ratenmessung
+// serverweit ist und nicht zwischen Gruppen unterscheidet, siehe
+// db.GetEnabledAutoBlockGroup - dieselbe Regel gilt bewusst auch für
+// ModeScraperPain, um die Zahl gleichzeitig laufender Zufallszyklen und
+// damit einhergehender Apache-Reloads zu begrenzen) - der Versuch, eine
+// zweite Gruppe zu aktivieren, wird abgelehnt.
+// idx_group_autoblock_singleton_enabled (siehe db.CreateTables) erzwingt das
+// zusätzlich hart in der DB, falls zwei Admin-Requests diese Prüfung
+// gleichzeitig passieren.
+func (m *Manager) Save(groupName string, enabled bool, mode string, thresholdRPS float64, scraperPainPercent int, minSeconds, maxSeconds int) error {
 	if enabled {
+		if mode == ModeThreshold && m.monitor == nil {
+			return fmt.Errorf("Schwellwert-basierter AutoBlock ist nicht konfiguriert (keine statusURL) - für diese Gruppe steht nur Scraper's Pain zur Verfügung")
+		}
 		existing, found, err := db.GetEnabledAutoBlockGroup(m.database)
 		if err != nil {
 			return err
@@ -94,7 +112,18 @@ func (m *Manager) Save(groupName string, enabled bool, thresholdRPS float64, min
 		return err
 	}
 
-	if err := db.UpsertAutoBlockSettings(m.database, groupName, enabled, thresholdRPS, minSeconds, maxSeconds); err != nil {
+	// Ein Moduswechsel bei einer gerade aktiven Gruppe (z. B. Schwellwert ->
+	// Scraper's Pain während ein automatischer Block läuft) muss den alten
+	// Zustand zuerst modusgerecht zurücksetzen - sonst bliebe ein veralteter
+	// Active/TriggeredUntil-Zustand bis zu dessen ursprünglichem Ablauf
+	// bestehen und würde die neue Konfiguration nicht ausgewertet.
+	if existing, err := db.GetAutoBlockSettings(m.database, groupName); err != nil {
+		return err
+	} else if existing != nil && existing.Active && existing.Mode != mode {
+		m.revertMode(groupName, existing.Mode)
+	}
+
+	if err := db.UpsertAutoBlockSettings(m.database, groupName, enabled, mode, thresholdRPS, scraperPainPercent, minSeconds, maxSeconds); err != nil {
 		return err
 	}
 	if enabled {
@@ -120,7 +149,7 @@ func (m *Manager) stopAndRevertIfActive(groupName string) error {
 		return err
 	}
 	if settings != nil && settings.Active {
-		m.revert(groupName)
+		m.revertMode(groupName, settings.Mode)
 	}
 	return nil
 }
@@ -158,9 +187,8 @@ func (m *Manager) runGroupLoop(ctx context.Context, groupName string) {
 	}
 }
 
-// evaluate ist ein einzelner Tick der Gruppen-AutoBlock-Goroutine: bei
-// laufendem Block wird nur die Ablaufzeit geprüft, sonst der aktuelle
-// RateMonitor-Schnitt gegen den (neu gewürfelten) Schwellwert.
+// evaluate ist ein einzelner Tick der Gruppen-AutoBlock-Goroutine: verzweigt
+// nach Modus in die Schwellwert- oder die Scraper's-Pain-Auswertung.
 func (m *Manager) evaluate(groupName string) {
 	settings, err := db.GetAutoBlockSettings(m.database, groupName)
 	if err != nil {
@@ -173,9 +201,20 @@ func (m *Manager) evaluate(groupName string) {
 		return
 	}
 
+	if settings.Mode == ModeScraperPain {
+		m.evaluateScraperPain(groupName, settings)
+		return
+	}
+	m.evaluateThreshold(groupName, settings)
+}
+
+// evaluateThreshold: bei laufendem Block wird nur die Ablaufzeit geprüft,
+// sonst der aktuelle RateMonitor-Schnitt gegen den (neu gewürfelten)
+// Schwellwert.
+func (m *Manager) evaluateThreshold(groupName string, settings *db.AutoBlockSettings) {
 	if settings.Active {
 		if settings.TriggeredUntil != nil && !time.Now().Before(*settings.TriggeredUntil) {
-			m.revert(groupName)
+			m.revertMode(groupName, ModeThreshold)
 		}
 		return
 	}
@@ -191,6 +230,12 @@ func (m *Manager) evaluate(groupName string) {
 		return
 	}
 
+	if m.monitor == nil {
+		// Keine statusURL konfiguriert - kann eigentlich nicht passieren
+		// (Save lässt ModeThreshold ohne Monitor nicht aktivieren), aber
+		// sicherheitshalber statt Nil-Pointer-Zugriff einfach nichts tun.
+		return
+	}
 	snap := m.monitor.Latest()
 	if !snap.Healthy {
 		return
@@ -218,7 +263,122 @@ func (m *Manager) evaluate(groupName string) {
 	app.LogIt.Info(fmt.Sprintf("AutoBlock %s: automatisch geblockt bis %s (Ø-RPS %.2f > Schwelle %.2f)", groupName, until.Format(time.RFC3339), snap.AvgRPS, threshold))
 }
 
-func (m *Manager) revert(groupName string) {
+// evaluateScraperPain: läuft der aktuelle Zyklus noch, nichts tun. Ist er
+// abgelaufen, sofort einen neuen Zyklus starten (kein Leerlauf zwischen
+// Zyklen - das ist der zentrale Unterschied zu evaluateThreshold, das nach
+// Ablauf einfach inaktiv bleibt, bis der Schwellwert erneut überschritten
+// wird). Frisch aktiviert oder gerade manuell zurückgesetzt (Active=false):
+// eine explizit whitelistete Gruppe wird - wie im Schwellwert-Modus - nie
+// automatisch geblockt, sonst würde ein manuelles Gruppen-Whitelisting durch
+// den nächsten Tick sofort wieder mit einer neuen Zufallsauswahl überschrieben.
+func (m *Manager) evaluateScraperPain(groupName string, settings *db.AutoBlockSettings) {
+	if settings.Active {
+		if settings.TriggeredUntil != nil && !time.Now().Before(*settings.TriggeredUntil) {
+			m.startScraperPainCycle(groupName, settings)
+		}
+		return
+	}
+
+	status, found, err := db.GetGroupStatus(m.database, groupName)
+	if err != nil {
+		app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Gruppenstatus konnte nicht gelesen werden: %v", groupName, err))
+		return
+	}
+	if !found || status == "w" {
+		return
+	}
+
+	m.startScraperPainCycle(groupName, settings)
+}
+
+// startScraperPainCycle würfelt eine neue Pool-Auswahl (Umfang siehe
+// settings.ScraperPainPercent, Kandidaten ohne individuell whitelistete
+// Pools) und eine neue Blockdauer, löst die vorherige Auswahl auf und
+// aktiviert die Gruppe (Export + Apache-Reload). Der Gruppenstatus selbst
+// bleibt dabei durchgängig "" - es ist immer nur ein Teil der Pools
+// geblockt, nie die ganze Gruppe (siehe poolSummariesForGroup im WebUI, das
+// das bereits als "gemischt/inaktiv" darstellt).
+func (m *Manager) startScraperPainCycle(groupName string, settings *db.AutoBlockSettings) {
+	candidates, err := db.ListPoolNamesInGroupExcludingWhitelisted(m.database, groupName)
+	if err != nil {
+		app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Pools konnten nicht gelesen werden: %v", groupName, err))
+		return
+	}
+	if len(candidates) == 0 {
+		app.LogIt.Debug(fmt.Sprintf("Scraper's Pain %s: keine blockierbaren Pools vorhanden (alle individuell whitelisted oder Gruppe leer)", groupName))
+		return
+	}
+
+	count := scraperPainCount(len(candidates), settings.ScraperPainPercent)
+	rand.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
+	selected := candidates[:count]
+	stillSelected := make(map[string]bool, len(selected))
+	for _, poolName := range selected {
+		stillSelected[poolName] = true
+	}
+
+	// Jeden Kandidaten, der diesmal nicht ausgewählt wurde, explizit auf
+	// inaktiv zurücksetzen - nicht nur die Pools der vorherigen Auswahl
+	// (group_scraperpain_pools). Sonst bliebe beim allerersten Zyklus (kein
+	// "vorher") ein Pool, der zufällig nicht zu den Erst-Kandidaten gehörte
+	// aber z. B. noch von der Neuanlage her als "b" markiert war, fälschlich
+	// dauerhaft geblockt statt nur die gewürfelte Auswahl.
+	for _, poolName := range candidates {
+		if !stillSelected[poolName] {
+			if err := db.DeactivatePool(m.database, poolName); err != nil {
+				app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Pool %s konnte nicht freigegeben werden: %v", groupName, poolName, err))
+			}
+		}
+	}
+	for _, poolName := range selected {
+		if err := db.BlockPool(m.database, poolName); err != nil {
+			app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Pool %s konnte nicht geblockt werden: %v", groupName, poolName, err))
+			return
+		}
+	}
+	if err := db.SetScraperPainActivePools(m.database, groupName, selected); err != nil {
+		app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Auswahl konnte nicht gespeichert werden: %v", groupName, err))
+	}
+
+	duration := randomDuration(settings.BlockDurationMinSeconds, settings.BlockDurationMaxSeconds)
+	until := time.Now().Add(duration)
+	if err := db.SetAutoBlockActive(m.database, groupName, until); err != nil {
+		app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Aktiv-Status konnte nicht gespeichert werden: %v", groupName, err))
+	}
+
+	if _, _, exportErr, reloadErr := functions.ActivateGroup(m.database, groupName); exportErr != nil {
+		app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Export fehlgeschlagen: %v", groupName, exportErr))
+	} else if reloadErr != nil {
+		app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Apache-Reload fehlgeschlagen: %v", groupName, reloadErr))
+	}
+	app.LogIt.Info(fmt.Sprintf("Scraper's Pain %s: %d von %d Pools geblockt bis %s", groupName, len(selected), len(candidates), until.Format(time.RFC3339)))
+}
+
+// scraperPainCount rechnet den konfigurierten Prozentanteil in eine
+// konkrete Pool-Anzahl um: aufgerundet, mindestens 1 (sofern Kandidaten
+// vorhanden), höchstens alle Kandidaten.
+func scraperPainCount(total, percent int) int {
+	if total <= 0 {
+		return 0
+	}
+	count := (total*percent + 99) / 100
+	if count < 1 {
+		count = 1
+	}
+	if count > total {
+		count = total
+	}
+	return count
+}
+
+// revertMode beendet einen laufenden automatischen Block modusabhängig: im
+// Schwellwert-Modus wird die gesamte Gruppe zurückgesetzt, bei Scraper's
+// Pain nur die zuletzt ausgewählten Pools.
+func (m *Manager) revertMode(groupName, mode string) {
+	if mode == ModeScraperPain {
+		m.revertScraperPain(groupName)
+		return
+	}
 	_, _, err, reloadErr := functions.DeactivateGroup(m.database, groupName)
 	if err != nil {
 		app.LogIt.Error(fmt.Sprintf("AutoBlock %s: automatischer Revert fehlgeschlagen: %v", groupName, err))
@@ -232,6 +392,34 @@ func (m *Manager) revert(groupName string) {
 		return
 	}
 	app.LogIt.Info(fmt.Sprintf("AutoBlock %s: automatischer Block beendet, Gruppe wieder inaktiv", groupName))
+}
+
+func (m *Manager) revertScraperPain(groupName string) {
+	poolNames, err := db.GetScraperPainActivePools(m.database, groupName)
+	if err != nil {
+		app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: aktuelle Auswahl konnte nicht gelesen werden: %v", groupName, err))
+		return
+	}
+	for _, poolName := range poolNames {
+		if err := db.DeactivatePool(m.database, poolName); err != nil {
+			app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Pool %s konnte nicht freigegeben werden: %v", groupName, poolName, err))
+		}
+	}
+	if err := db.ClearScraperPainActivePools(m.database, groupName); err != nil {
+		app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Auswahl konnte nicht gelöscht werden: %v", groupName, err))
+	}
+	if err := db.ClearAutoBlockActive(m.database, groupName); err != nil {
+		app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Aktiv-Status konnte nicht zurückgesetzt werden: %v", groupName, err))
+		return
+	}
+	if len(poolNames) > 0 {
+		if _, _, exportErr, reloadErr := functions.ActivateGroup(m.database, groupName); exportErr != nil {
+			app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Export fehlgeschlagen: %v", groupName, exportErr))
+		} else if reloadErr != nil {
+			app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Apache-Reload fehlgeschlagen: %v", groupName, reloadErr))
+		}
+	}
+	app.LogIt.Info(fmt.Sprintf("Scraper's Pain %s: beendet, %d Pools wieder freigegeben", groupName, len(poolNames)))
 }
 
 // jitter würfelt value um ±variancePercent - bei jeder Auswertung neu, damit

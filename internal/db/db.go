@@ -80,18 +80,78 @@ func CreateTables(database *sql.DB) error {
 	   CREATE TABLE IF NOT EXISTS group_autoblock (
 	       group_name TEXT PRIMARY KEY,
 	       enabled INTEGER NOT NULL DEFAULT 0,
+	       mode TEXT NOT NULL DEFAULT 'threshold',
 	       threshold_rps REAL NOT NULL DEFAULT 0,
+	       scraper_pain_percent INTEGER NOT NULL DEFAULT 0,
 	       block_duration_min_seconds INTEGER NOT NULL DEFAULT 0,
 	       block_duration_max_seconds INTEGER NOT NULL DEFAULT 0,
 	       active INTEGER NOT NULL DEFAULT 0,
 	       triggered_until TEXT
 	   );
 	   CREATE UNIQUE INDEX IF NOT EXISTS idx_group_autoblock_singleton_enabled ON group_autoblock (enabled) WHERE enabled = 1;
+	   CREATE TABLE IF NOT EXISTS group_scraperpain_pools (
+	       group_name TEXT NOT NULL,
+	       pool_name TEXT NOT NULL,
+	       PRIMARY KEY (group_name, pool_name)
+	   );
 	   `
 	if _, err := database.Exec(sqlStmt); err != nil {
 		return err
 	}
-	return migrateGroupNameColumn(database)
+	if err := migrateGroupNameColumn(database); err != nil {
+		return err
+	}
+	return migrateGroupAutoblockColumns(database)
+}
+
+// migrateGroupAutoblockColumns ergänzt die mode- und
+// scraper_pain_percent-Spalten auf bestehenden group_autoblock-Tabellen
+// (vor Einführung von "Scraper's Pain", siehe internal/autoblock), ohne
+// vorhandene Konfigurationen anzutasten - eine bestehende Zeile bekommt
+// dabei automatisch mode='threshold' (Spalten-Default), entspricht also
+// genau ihrem bisherigen (einzigen) Verhalten.
+func migrateGroupAutoblockColumns(database *sql.DB) error {
+	rows, err := database.Query(`PRAGMA table_info(group_autoblock)`)
+	if err != nil {
+		return err
+	}
+
+	hasMode, hasPercent := false, false
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull, pk int
+		var dfltValue sql.NullString
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		switch name {
+		case "mode":
+			hasMode = true
+		case "scraper_pain_percent":
+			hasPercent = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	if !hasMode {
+		app.LogIt.Info("migriere Schema: füge mode zu group_autoblock hinzu")
+		if _, err := database.Exec(`ALTER TABLE group_autoblock ADD COLUMN mode TEXT NOT NULL DEFAULT 'threshold'`); err != nil {
+			return err
+		}
+	}
+	if !hasPercent {
+		app.LogIt.Info("migriere Schema: füge scraper_pain_percent zu group_autoblock hinzu")
+		if _, err := database.Exec(`ALTER TABLE group_autoblock ADD COLUMN scraper_pain_percent INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // migrateGroupNameColumn ergänzt die group_name-Spalte auf bestehenden
@@ -697,7 +757,9 @@ const autoBlockTimeFormat = time.RFC3339
 type AutoBlockSettings struct {
 	GroupName               string
 	Enabled                 bool
+	Mode                    string // "threshold" oder "scraperspain"
 	ThresholdRPS            float64
+	ScraperPainPercent      int
 	BlockDurationMinSeconds int
 	BlockDurationMaxSeconds int
 	Active                  bool
@@ -710,7 +772,7 @@ func scanAutoBlockSettings(row interface {
 	var s AutoBlockSettings
 	var enabled, active int
 	var triggeredUntil sql.NullString
-	if err := row.Scan(&s.GroupName, &enabled, &s.ThresholdRPS, &s.BlockDurationMinSeconds, &s.BlockDurationMaxSeconds, &active, &triggeredUntil); err != nil {
+	if err := row.Scan(&s.GroupName, &enabled, &s.Mode, &s.ThresholdRPS, &s.ScraperPainPercent, &s.BlockDurationMinSeconds, &s.BlockDurationMaxSeconds, &active, &triggeredUntil); err != nil {
 		return nil, err
 	}
 	s.Enabled = enabled != 0
@@ -727,7 +789,7 @@ func scanAutoBlockSettings(row interface {
 // nil, falls für sie noch nie eine Einstellung gespeichert wurde (kein Fehler).
 func GetAutoBlockSettings(dbConn *sql.DB, groupName string) (*AutoBlockSettings, error) {
 	row := dbConn.QueryRow(`
-        SELECT group_name, enabled, threshold_rps, block_duration_min_seconds, block_duration_max_seconds, active, triggered_until
+        SELECT group_name, enabled, mode, threshold_rps, scraper_pain_percent, block_duration_min_seconds, block_duration_max_seconds, active, triggered_until
         FROM group_autoblock
         WHERE group_name = ?
     `, groupName)
@@ -745,7 +807,7 @@ func GetAutoBlockSettings(dbConn *sql.DB, groupName string) (*AutoBlockSettings,
 // Überwachung - Grundlage für autoblock.Manager.StartAll beim Programmstart.
 func ListEnabledAutoBlock(dbConn *sql.DB) ([]AutoBlockSettings, error) {
 	rows, err := dbConn.Query(`
-        SELECT group_name, enabled, threshold_rps, block_duration_min_seconds, block_duration_max_seconds, active, triggered_until
+        SELECT group_name, enabled, mode, threshold_rps, scraper_pain_percent, block_duration_min_seconds, block_duration_max_seconds, active, triggered_until
         FROM group_autoblock
         WHERE enabled = 1
     `)
@@ -786,16 +848,18 @@ func GetEnabledAutoBlockGroup(dbConn *sql.DB) (groupName string, found bool, err
 // oder überschreibt sie (vom Admin im WebUI gepflegt). Active/TriggeredUntil
 // (Laufzeitstatus, siehe SetAutoBlockActive/ClearAutoBlockActive) bleiben
 // dabei unangetastet.
-func UpsertAutoBlockSettings(dbConn *sql.DB, groupName string, enabled bool, thresholdRPS float64, minSeconds, maxSeconds int) error {
+func UpsertAutoBlockSettings(dbConn *sql.DB, groupName string, enabled bool, mode string, thresholdRPS float64, scraperPainPercent int, minSeconds, maxSeconds int) error {
 	_, err := dbConn.Exec(`
-        INSERT INTO group_autoblock(group_name, enabled, threshold_rps, block_duration_min_seconds, block_duration_max_seconds)
-        VALUES(?, ?, ?, ?, ?)
+        INSERT INTO group_autoblock(group_name, enabled, mode, threshold_rps, scraper_pain_percent, block_duration_min_seconds, block_duration_max_seconds)
+        VALUES(?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(group_name) DO UPDATE SET
             enabled = excluded.enabled,
+            mode = excluded.mode,
             threshold_rps = excluded.threshold_rps,
+            scraper_pain_percent = excluded.scraper_pain_percent,
             block_duration_min_seconds = excluded.block_duration_min_seconds,
             block_duration_max_seconds = excluded.block_duration_max_seconds
-    `, groupName, boolToInt(enabled), thresholdRPS, minSeconds, maxSeconds)
+    `, groupName, boolToInt(enabled), mode, thresholdRPS, scraperPainPercent, minSeconds, maxSeconds)
 	return err
 }
 
@@ -830,10 +894,110 @@ func ClearAutoBlockActive(dbConn *sql.DB, groupName string) error {
 }
 
 // DeleteAutoBlockSettings löscht die AutoBlock-Konfiguration einer Gruppe
-// (z. B. weil die Gruppe selbst gelöscht wird, siehe DeleteGroup).
+// (z. B. weil die Gruppe selbst gelöscht wird, siehe DeleteGroup) inklusive
+// einer evtl. laufenden Scraper's-Pain-Auswahl (siehe
+// ClearScraperPainActivePools) - sonst bliebe bei gleichnamiger Neuanlage
+// der Gruppe eine verwaiste Auswahl von einem früheren Lauf bestehen.
 func DeleteAutoBlockSettings(dbConn *sql.DB, groupName string) error {
+	if err := ClearScraperPainActivePools(dbConn, groupName); err != nil {
+		return err
+	}
 	_, err := dbConn.Exec(`DELETE FROM group_autoblock WHERE group_name = ?`, groupName)
 	return err
+}
+
+// ===============
+// Scraper's Pain (Pool-Auswahl des laufenden Zyklus)
+// ===============
+
+// SetScraperPainActivePools ersetzt die für groupName gespeicherte Auswahl
+// vollständig durch poolNames - aufgerufen bei jedem neuen Scraper's-Pain-
+// Zyklus (siehe internal/autoblock.startScraperPainCycle), damit beim
+// nächsten Zyklusende/Deaktivieren/Prozess-Neustart genau die aktuell
+// geblockten Pools wieder erkannt und freigegeben werden können.
+func SetScraperPainActivePools(dbConn *sql.DB, groupName string, poolNames []string) error {
+	tx, err := dbConn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`DELETE FROM group_scraperpain_pools WHERE group_name = ?`, groupName); err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`INSERT INTO group_scraperpain_pools(group_name, pool_name) VALUES(?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, poolName := range poolNames {
+		if _, err := stmt.Exec(groupName, poolName); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// GetScraperPainActivePools liefert die Pools, die der aktuelle Scraper's-
+// Pain-Zyklus einer Gruppe geblockt hat.
+func GetScraperPainActivePools(dbConn *sql.DB, groupName string) ([]string, error) {
+	rows, err := dbConn.Query(`SELECT pool_name FROM group_scraperpain_pools WHERE group_name = ? ORDER BY pool_name`, groupName)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		names = append(names, n)
+	}
+	return names, rows.Err()
+}
+
+// ClearScraperPainActivePools löscht die gespeicherte Auswahl einer Gruppe
+// (Zyklusende, Deaktivieren oder Moduswechsel - siehe internal/autoblock).
+func ClearScraperPainActivePools(dbConn *sql.DB, groupName string) error {
+	_, err := dbConn.Exec(`DELETE FROM group_scraperpain_pools WHERE group_name = ?`, groupName)
+	return err
+}
+
+// ListPoolNamesInGroupExcludingWhitelisted liefert die Pool-Namen einer
+// Gruppe, die nicht individuell vollständig whitelisted sind (alle Einträge
+// Status "w") - Kandidaten für Scraper's Pain (siehe internal/autoblock):
+// ein individuell whitelisteter Pool wird nie automatisch geblockt, analog
+// dazu, dass eine whitelisted Gruppe im Schwellwert-Modus nie automatisch
+// geblockt wird.
+func ListPoolNamesInGroupExcludingWhitelisted(dbConn *sql.DB, groupName string) ([]string, error) {
+	entries, err := ListByGroup(dbConn, groupName)
+	if err != nil {
+		return nil, err
+	}
+	type counts struct{ w, total int }
+	byName := make(map[string]*counts)
+	var order []string
+	for _, e := range entries {
+		c, ok := byName[e.Name]
+		if !ok {
+			c = &counts{}
+			byName[e.Name] = c
+			order = append(order, e.Name)
+		}
+		c.total++
+		if e.Status == "w" {
+			c.w++
+		}
+	}
+	var names []string
+	for _, name := range order {
+		if c := byName[name]; c.w != c.total {
+			names = append(names, name)
+		}
+	}
+	return names, nil
 }
 
 func boolToInt(b bool) int {

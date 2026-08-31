@@ -36,14 +36,23 @@ func groupStatusLabel(status string) string {
 
 // PoolSummary fasst den Status eines Pools innerhalb einer Gruppe zusammen.
 type PoolSummary struct {
-	Name   string
-	Status string // "w", "b" oder "" (gemischt/keine Einträge)
+	Name              string
+	Status            string // "w", "b" oder "" (gemischt/keine Einträge)
+	ScraperPainActive bool   // true, wenn der aktuelle Scraper's-Pain-Zyklus der Gruppe diesen Pool geblockt hat
 }
 
 func poolSummariesForGroup(database *sql.DB, groupName string) ([]PoolSummary, error) {
 	poolNames, err := db.ListPoolNamesInGroup(database, groupName)
 	if err != nil {
 		return nil, err
+	}
+	scraperPainActive, err := db.GetScraperPainActivePools(database, groupName)
+	if err != nil {
+		return nil, err
+	}
+	scraperPainActiveSet := make(map[string]bool, len(scraperPainActive))
+	for _, poolName := range scraperPainActive {
+		scraperPainActiveSet[poolName] = true
 	}
 	summaries := make([]PoolSummary, 0, len(poolNames))
 	for _, poolName := range poolNames {
@@ -59,23 +68,22 @@ func poolSummariesForGroup(database *sql.DB, groupName string) ([]PoolSummary, e
 		if bCount == 0 && wCount != 0 {
 			status = "w"
 		}
-		summaries = append(summaries, PoolSummary{Name: poolName, Status: status})
+		summaries = append(summaries, PoolSummary{Name: poolName, Status: status, ScraperPainActive: scraperPainActiveSet[poolName]})
 	}
 	return summaries, nil
 }
 
 // addAutoBlockContext reichert ctx um die AutoBlock-Einstellung/den Status
 // einer Gruppe sowie den aktuellen globalen Ratenschnitt an (für die
-// Gruppen-Detailseite). Ist AutoBlock nicht konfiguriert (autoBlockManager
-// == nil), bleibt "autoBlockAvailable" false und das Template blendet die
-// entsprechende Karte aus.
+// Gruppen-Detailseite). Die Karte ist immer sichtbar (Scraper's Pain braucht
+// keine statusURL) - "autoBlockMonitorAvailable" steuert nur, ob der
+// Schwellwert-Teilbereich nutzbar ist.
 func addAutoBlockContext(ctx gin.H, database *sql.DB, autoBlockManager *autoblock.Manager, groupName string) {
-	if autoBlockManager == nil {
-		ctx["autoBlockAvailable"] = false
-		return
+	monitor := autoBlockManager.Monitor()
+	ctx["autoBlockMonitorAvailable"] = monitor != nil
+	if monitor != nil {
+		ctx["autoBlockMonitor"] = monitor.Latest()
 	}
-	ctx["autoBlockAvailable"] = true
-	ctx["autoBlockMonitor"] = autoBlockManager.Monitor().Latest()
 	ctx["autoBlockVariancePercent"] = app.Config.AutoBlock.ThresholdVariancePercent
 	ctx["autoBlockWindowMinutes"] = app.Config.AutoBlock.MeasureWindowMinutes
 	settings, err := db.GetAutoBlockSettings(database, groupName)
@@ -84,6 +92,8 @@ func addAutoBlockContext(ctx gin.H, database *sql.DB, autoBlockManager *autobloc
 		return
 	}
 	ctx["autoBlockSettings"] = settings
+	ctx["autoBlockModeThreshold"] = autoblock.ModeThreshold
+	ctx["autoBlockModeScraperPain"] = autoblock.ModeScraperPain
 	// Blockdauer wird intern (DB, Manager, randomDuration) durchgängig in
 	// Sekunden gehalten - im WebUI aber für Menschen in Minuten angezeigt/
 	// eingegeben (siehe autoblock-Handler, der beim Speichern zurück in
@@ -99,8 +109,17 @@ func addAutoBlockContext(ctx gin.H, database *sql.DB, autoBlockManager *autobloc
 	ctx["autoBlockMinMinutes"] = minMinutes
 	ctx["autoBlockMaxMinutes"] = maxMinutes
 
+	if settings != nil && settings.Mode == autoblock.ModeScraperPain && settings.Active {
+		activePools, err := db.GetScraperPainActivePools(database, groupName)
+		if err != nil {
+			app.LogIt.Debug(fmt.Sprintf("Fehler beim Laden der Scraper's-Pain-Auswahl für %s: %v", groupName, err))
+		} else {
+			ctx["scraperPainActivePools"] = activePools
+		}
+	}
+
 	// Es darf immer nur eine Gruppe gleichzeitig AutoBlock aktiviert haben
-	// (siehe Manager.Enable) - für jede andere Gruppe wird die Aktivierung im
+	// (siehe Manager.Save) - für jede andere Gruppe wird die Aktivierung im
 	// Formular ausgegraut.
 	lockedBy, found, err := db.GetEnabledAutoBlockGroup(database)
 	if err != nil {
@@ -140,9 +159,10 @@ func listConfFiles(path string) ([]ConfFileInfo, error) {
 	return files, nil
 }
 
-// NewRouter baut den fairDB-Webserver auf. autoBlockManager ist nil, wenn
-// AutoBlock nicht konfiguriert ist (siehe main.go) - alle AutoBlock-
-// bezogenen Routen/Template-Felder werden dann übersprungen bzw. bleiben leer.
+// NewRouter baut den fairDB-Webserver auf. autoBlockManager ist nie nil
+// (siehe main.go) - dessen RateMonitor kann es aber sein, wenn keine
+// statusURL konfiguriert ist; dann steht nur der Schwellwert-Modus nicht
+// zur Verfügung, Scraper's Pain funktioniert unabhängig davon.
 func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Manager) *gin.Engine {
 	dr := gin.Default()
 	dr.SetTrustedProxies(app.Config.TrustedProxies)
@@ -443,41 +463,65 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 	// Gruppe löschen (enthaltene Pools werden ungruppiert, nicht gelöscht)
 	admin.POST("/groups/:name/delete", func(c *gin.Context) {
 		groupName := c.Param("name")
-		if autoBlockManager != nil {
-			// Läuft gerade eine AutoBlock-Überwachung für diese Gruppe, muss
-			// sie gestoppt werden, bevor die Gruppe verschwindet (siehe
-			// DeleteGroup, das auch die AutoBlock-Einstellung mit löscht).
-			_ = autoBlockManager.Stop(groupName)
-		}
+		// Läuft gerade eine AutoBlock-Überwachung für diese Gruppe, muss sie
+		// gestoppt werden, bevor die Gruppe verschwindet (siehe DeleteGroup,
+		// das auch die AutoBlock-Einstellung mit löscht).
+		_ = autoBlockManager.Stop(groupName)
 		_ = db.DeleteGroup(database, groupName)
 		c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups")
 	})
 
-	// AutoBlock einer Gruppe konfigurieren/aktivieren/deaktivieren. Die
-	// eingegebenen Werte (Schwellwert, Blockdauer-Spanne) werden immer
+	// AutoBlock einer Gruppe konfigurieren/aktivieren/deaktivieren (Modus
+	// "threshold" oder "scraperspain", siehe internal/autoblock). Die
+	// eingegebenen Werte (Schwellwert/Umfang, Blockdauer-Spanne) werden immer
 	// gespeichert, auch beim Deaktivieren - sonst würden beim ersten
 	// Speichern einer noch nicht aktivierten Gruppe (Checkbox unangetastet)
 	// die eingegebenen Werte stillschweigend verworfen und das Formular
-	// erschiene beim nächsten Aufruf leer.
+	// erschiene beim nächsten Aufruf leer. Ist das jeweils andere Modus-Feld
+	// (Schwellwert bzw. Umfang) leer/ungültig übermittelt - z. B. weil es im
+	// Formular gerade ausgeblendet war - fällt es auf den zuletzt
+	// gespeicherten Wert zurück, statt den anderen Modus zu verwerfen.
 	admin.POST("/groups/:name/autoblock", func(c *gin.Context) {
 		groupName := c.Param("name")
-		if autoBlockManager == nil {
-			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape("AutoBlock ist nicht konfiguriert (kein statusURL in der fairDB-Config)"))
-			return
+		existing, _ := db.GetAutoBlockSettings(database, groupName)
+
+		mode := c.PostForm("mode")
+		if mode != autoblock.ModeScraperPain {
+			mode = autoblock.ModeThreshold
 		}
 		enabled := c.PostForm("enabled") != ""
+
 		thresholdRPS, errT := strconv.ParseFloat(strings.TrimSpace(c.PostForm("thresholdRPS")), 64)
+		if errT != nil && existing != nil {
+			thresholdRPS, errT = existing.ThresholdRPS, nil
+		}
+		scraperPainPercent, errP := strconv.Atoi(strings.TrimSpace(c.PostForm("scraperPainPercent")))
+		if errP != nil && existing != nil {
+			scraperPainPercent, errP = existing.ScraperPainPercent, nil
+		}
 		minMinutes, errMin := strconv.Atoi(strings.TrimSpace(c.PostForm("blockDurationMinMinutes")))
 		maxMinutes, errMax := strconv.Atoi(strings.TrimSpace(c.PostForm("blockDurationMaxMinutes")))
 		// Formular/Anzeige arbeiten in Minuten, DB/Manager/randomDuration
 		// intern durchgängig in Sekunden (siehe addAutoBlockContext) - hier an
 		// der Formulargrenze umgerechnet.
 		minSeconds, maxSeconds := minMinutes*60, maxMinutes*60
-		valid := errT == nil && errMin == nil && errMax == nil && thresholdRPS > 0 && minMinutes > 0 && maxMinutes >= minMinutes
+
+		valid := errMin == nil && errMax == nil && minMinutes > 0 && maxMinutes >= minMinutes
+		if mode == autoblock.ModeThreshold {
+			valid = valid && errT == nil && thresholdRPS > 0
+		} else {
+			valid = valid && errP == nil && scraperPainPercent >= 1 && scraperPainPercent <= 100
+		}
 
 		if !valid {
 			if enabled {
-				c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape("Ungültige AutoBlock-Werte (Schwellwert > 0, 0 < Blockdauer-Min <= Blockdauer-Max erforderlich)"))
+				errMsg := "Ungültige AutoBlock-Werte (0 < Blockdauer-Min <= Blockdauer-Max erforderlich"
+				if mode == autoblock.ModeThreshold {
+					errMsg += ", Schwellwert > 0)"
+				} else {
+					errMsg += ", Umfang 1-100 %)"
+				}
+				c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape(errMsg))
 				return
 			}
 			// Deaktivieren ohne gültige neue Werte (z. B. Formular manuell
@@ -495,7 +539,7 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 			return
 		}
 
-		if err := autoBlockManager.Save(groupName, enabled, thresholdRPS, minSeconds, maxSeconds); err != nil {
+		if err := autoBlockManager.Save(groupName, enabled, mode, thresholdRPS, scraperPainPercent, minSeconds, maxSeconds); err != nil {
 			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape(err.Error()))
 			return
 		}
