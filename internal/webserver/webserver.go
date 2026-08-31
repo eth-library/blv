@@ -34,6 +34,28 @@ func groupStatusLabel(status string) string {
 	}
 }
 
+// disableAutoBlockForGroup schaltet eine laufende AutoBlock-Überwachung
+// (Schwellwert oder Scraper's Pain) einer Gruppe vollständig ab: stoppt die
+// Goroutine (setzt dabei einen gerade laufenden Block modusgerecht zurück,
+// siehe Manager.Stop) und markiert enabled=false, damit sie beim nächsten
+// Programmstart nicht erneut anläuft. Aufgerufen von jeder manuellen
+// Whitelist-/Block-/Inaktiv-Aktion (Gruppe oder Pool) - AutoBlock und
+// manuelle Kontrolle schließen sich gegenseitig aus, ein manueller Eingriff
+// beendet AutoBlock also komplett statt nur den aktuellen Block zu pausieren.
+// No-op bei leerem groupName (z. B. ein noch ungruppierter Pool) oder wenn
+// für die Gruppe noch nie AutoBlock konfiguriert wurde.
+func disableAutoBlockForGroup(database *sql.DB, autoBlockManager *autoblock.Manager, groupName string) {
+	if groupName == "" {
+		return
+	}
+	if err := autoBlockManager.Stop(groupName); err != nil {
+		app.LogIt.Debug(fmt.Sprintf("AutoBlock %s: Stop bei manueller Aktion fehlgeschlagen: %v", groupName, err))
+	}
+	if err := db.SetAutoBlockEnabled(database, groupName, false); err != nil {
+		app.LogIt.Debug(fmt.Sprintf("AutoBlock %s: Deaktivieren bei manueller Aktion fehlgeschlagen: %v", groupName, err))
+	}
+}
+
 // PoolSummary fasst den Status eines Pools innerhalb einer Gruppe zusammen.
 type PoolSummary struct {
 	Name              string
@@ -78,7 +100,10 @@ func poolSummariesForGroup(database *sql.DB, groupName string) ([]PoolSummary, e
 // Gruppen-Detailseite). Die Karte ist immer sichtbar (Scraper's Pain braucht
 // keine statusURL) - "autoBlockMonitorAvailable" steuert nur, ob der
 // Schwellwert-Teilbereich nutzbar ist.
-func addAutoBlockContext(ctx gin.H, database *sql.DB, autoBlockManager *autoblock.Manager, groupName string) {
+// Rückgabewerte (settings, aktuelle Scraper's-Pain-Auswahl) werden vom
+// Aufrufer für den Status-Banner weiterverwendet (siehe groupStatusBanner),
+// ohne AutoBlockSettings ein zweites Mal aus der DB zu laden.
+func addAutoBlockContext(ctx gin.H, database *sql.DB, autoBlockManager *autoblock.Manager, groupName string) (*db.AutoBlockSettings, []string) {
 	monitor := autoBlockManager.Monitor()
 	ctx["autoBlockMonitorAvailable"] = monitor != nil
 	if monitor != nil {
@@ -86,10 +111,11 @@ func addAutoBlockContext(ctx gin.H, database *sql.DB, autoBlockManager *autobloc
 	}
 	ctx["autoBlockVariancePercent"] = app.Config.AutoBlock.ThresholdVariancePercent
 	ctx["autoBlockWindowMinutes"] = app.Config.AutoBlock.MeasureWindowMinutes
+	ctx["scraperPainMaxPools"] = autoBlockManager.ScraperPainMaxPools()
 	settings, err := db.GetAutoBlockSettings(database, groupName)
 	if err != nil {
 		app.LogIt.Debug(fmt.Sprintf("Fehler beim Laden der AutoBlock-Einstellung für %s: %v", groupName, err))
-		return
+		return nil, nil
 	}
 	ctx["autoBlockSettings"] = settings
 	ctx["autoBlockModeThreshold"] = autoblock.ModeThreshold
@@ -109,12 +135,12 @@ func addAutoBlockContext(ctx gin.H, database *sql.DB, autoBlockManager *autobloc
 	ctx["autoBlockMinMinutes"] = minMinutes
 	ctx["autoBlockMaxMinutes"] = maxMinutes
 
+	var scraperPainActivePools []string
 	if settings != nil && settings.Mode == autoblock.ModeScraperPain && settings.Active {
-		activePools, err := db.GetScraperPainActivePools(database, groupName)
+		scraperPainActivePools, err = db.GetScraperPainActivePools(database, groupName)
 		if err != nil {
 			app.LogIt.Debug(fmt.Sprintf("Fehler beim Laden der Scraper's-Pain-Auswahl für %s: %v", groupName, err))
-		} else {
-			ctx["scraperPainActivePools"] = activePools
+			scraperPainActivePools = nil
 		}
 	}
 
@@ -124,10 +150,49 @@ func addAutoBlockContext(ctx gin.H, database *sql.DB, autoBlockManager *autobloc
 	lockedBy, found, err := db.GetEnabledAutoBlockGroup(database)
 	if err != nil {
 		app.LogIt.Debug(fmt.Sprintf("Fehler beim Prüfen der AutoBlock-Sperre für %s: %v", groupName, err))
-		return
+		return settings, scraperPainActivePools
 	}
 	if found && lockedBy != groupName {
 		ctx["autoBlockLockedBy"] = lockedBy
+	}
+	return settings, scraperPainActivePools
+}
+
+// groupStatusBanner berechnet Label/Detailzeile/CSS-Klasse für den
+// Status-Banner ganz oben auf der Gruppen-Detailseite. Fasst den reinen
+// Gruppenstatus (whitelisted/blocked/inaktiv) mit dem AutoBlock-Zustand
+// zusammen, damit das Template diese Fallunterscheidung nicht selbst
+// nachbilden muss.
+func groupStatusBanner(groupStatus string, settings *db.AutoBlockSettings, scraperPainActivePools []string) (label, detail, cssClass string) {
+	switch groupStatus {
+	case "w":
+		return "whitelisted", "", "status-whitelisted"
+	case "b":
+		if settings != nil && settings.Enabled && settings.Mode == autoblock.ModeThreshold && settings.Active {
+			until := ""
+			if settings.TriggeredUntil != nil {
+				until = " bis " + settings.TriggeredUntil.Format("2006-01-02 15:04:05")
+			}
+			return "blocked", "AutoBlock (Schwellwert-basiert) aktiv - automatisch geblockt" + until + ".", "status-blocked"
+		}
+		return "blocked", "", "status-blocked"
+	default:
+		if settings != nil && settings.Enabled && settings.Mode == autoblock.ModeScraperPain {
+			detail := fmt.Sprintf("Umfang %d %%", settings.ScraperPainPercent)
+			if settings.Active {
+				detail += fmt.Sprintf(" - aktuell %d Pool(s) geblockt", len(scraperPainActivePools))
+				if settings.TriggeredUntil != nil {
+					detail += ", nächste Neuauswahl um " + settings.TriggeredUntil.Format("2006-01-02 15:04:05")
+				}
+			} else {
+				detail += " - wird vorbereitet"
+			}
+			return "Scraper's Pain", detail, "status-scraperpain"
+		}
+		if settings != nil && settings.Enabled && settings.Mode == autoblock.ModeThreshold {
+			return "inaktiv", fmt.Sprintf("AutoBlock (Schwellwert-basiert) aktiv, Schwellwert %.0f req/s - wartet auf Überschreitung.", settings.ThresholdRPS), "status-inactive"
+		}
+		return "inaktiv", "", "status-inactive"
 	}
 }
 
@@ -394,16 +459,27 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 			"message":     c.Query("message"),
 			"BasePath":    BasePath,
 		}
-		addAutoBlockContext(ctx, database, autoBlockManager, groupName)
+		settings, scraperPainActivePools := addAutoBlockContext(ctx, database, autoBlockManager, groupName)
+		statusLabel, statusDetail, statusClass := groupStatusBanner(status, settings, scraperPainActivePools)
+		ctx["statusLabel"] = statusLabel
+		ctx["statusDetail"] = statusDetail
+		ctx["statusClass"] = statusClass
+		// Der Schwellwert-Modus blockt bei Auslösung immer die komplette
+		// Gruppe (siehe Manager.evaluateThreshold) - bei sehr großen Gruppen
+		// wird die Option daher ausgegraut (siehe auch Manager.Save, das
+		// dieselbe Grenze serverseitig hart durchsetzt).
+		maxPools := autoBlockManager.ScraperPainMaxPools()
+		ctx["thresholdGroupTooLarge"] = maxPools > 0 && len(pools) > maxPools
 		c.HTML(http.StatusOK, "group_detail.html", ctx)
 	})
 
 	// Gruppe whitelisten (blockte Pools verhindern das Whitelisten, siehe db.WhitelistPool)
 	admin.POST("/groups/:name/whitelist", func(c *gin.Context) {
 		groupName := c.Param("name")
-		// Eine manuelle Aktion hat immer Vorrang vor einem laufenden AutoBlock -
-		// sonst würde dessen Revert-Timer die manuelle Entscheidung später überschreiben.
-		_ = db.ClearAutoBlockActive(database, groupName)
+		// AutoBlock und manuelle Aktionen schließen sich gegenseitig aus -
+		// eine manuelle Aktion schaltet einen laufenden AutoBlock komplett ab
+		// statt ihn nur zu pausieren (siehe disableAutoBlockForGroup).
+		disableAutoBlockForGroup(database, autoBlockManager, groupName)
 		conflicts, _, _, err, reloadErr := functions.WhitelistGroup(database, groupName)
 		if err != nil {
 			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+err.Error())
@@ -429,10 +505,9 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 	// Gruppe blocken
 	admin.POST("/groups/:name/block", func(c *gin.Context) {
 		groupName := c.Param("name")
-		// siehe Kommentar bei /whitelist: manuelle Aktion räumt einen
-		// laufenden AutoBlock-Zustand auf, damit dessen Revert-Timer diese
-		// manuelle Entscheidung nicht später zurücknimmt.
-		_ = db.ClearAutoBlockActive(database, groupName)
+		// siehe Kommentar bei /whitelist: manuelle Aktion schaltet einen
+		// laufenden AutoBlock komplett ab.
+		disableAutoBlockForGroup(database, autoBlockManager, groupName)
 		_, _, err, reloadErr := functions.BlockGroup(database, groupName)
 		if err != nil {
 			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+err.Error())
@@ -440,6 +515,24 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 		}
 		if reloadErr != nil {
 			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error=Gruppe geblockt, aber Apache-Reload fehlgeschlagen: "+reloadErr.Error())
+			return
+		}
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName)
+	})
+
+	// Gruppe manuell inaktiv setzen (weder whitelisted noch blocked)
+	admin.POST("/groups/:name/deactivate", func(c *gin.Context) {
+		groupName := c.Param("name")
+		// siehe Kommentar bei /whitelist: manuelle Aktion schaltet einen
+		// laufenden AutoBlock komplett ab.
+		disableAutoBlockForGroup(database, autoBlockManager, groupName)
+		_, _, err, reloadErr := functions.DeactivateGroup(database, groupName)
+		if err != nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+err.Error())
+			return
+		}
+		if reloadErr != nil {
+			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error=Gruppe inaktiv gesetzt, aber Apache-Reload fehlgeschlagen: "+reloadErr.Error())
 			return
 		}
 		c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName)
@@ -654,6 +747,11 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 			})
 			return
 		}
+		// Manuelle Aktion schaltet ein evtl. laufendes AutoBlock der Gruppe
+		// dieses Pools komplett ab (siehe disableAutoBlockForGroup).
+		if groupName, found, _ := db.GetPoolGroup(database, poolName); found {
+			disableAutoBlockForGroup(database, autoBlockManager, groupName)
+		}
 		c.Redirect(http.StatusSeeOther, BasePath+"/admin/pools/"+poolName)
 	})
 
@@ -661,6 +759,19 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 	admin.POST("/pools/:name/block", func(c *gin.Context) {
 		poolName := c.Param("name")
 		_ = db.BlockPool(database, poolName)
+		if groupName, found, _ := db.GetPoolGroup(database, poolName); found {
+			disableAutoBlockForGroup(database, autoBlockManager, groupName)
+		}
+		c.Redirect(http.StatusSeeOther, BasePath+"/admin/pools/"+poolName)
+	})
+
+	// Pool manuell inaktiv setzen (weder whitelisted noch blocked)
+	admin.POST("/pools/:name/deactivate", func(c *gin.Context) {
+		poolName := c.Param("name")
+		_ = db.DeactivatePool(database, poolName)
+		if groupName, found, _ := db.GetPoolGroup(database, poolName); found {
+			disableAutoBlockForGroup(database, autoBlockManager, groupName)
+		}
 		c.Redirect(http.StatusSeeOther, BasePath+"/admin/pools/"+poolName)
 	})
 

@@ -29,6 +29,11 @@
         <div class="alert alert-success">{{ .message }}</div>
       {{ end }}
 
+      <section class="card status-banner status-banner--{{ .statusClass }}">
+        <p class="status-banner-label">{{ .statusLabel }}</p>
+        {{ if .statusDetail }}<p class="status-banner-detail">{{ .statusDetail }}</p>{{ end }}
+      </section>
+
       <div class="grid">
         <div class="grid-left">
 
@@ -47,6 +52,9 @@
             {{ if not .autoBlockMonitorAvailable }}
               <p class="hint">Schwellwert-basierter Block ist nicht verfügbar (keine statusURL in der fairDB-Config) - Scraper's Pain funktioniert unabhängig davon.</p>
             {{ end }}
+            {{ if .thresholdGroupTooLarge }}
+              <p class="hint">Schwellwert-basierter Block ist für diese Gruppe deaktiviert ({{ len .pools }} Pools, Grenze {{ .scraperPainMaxPools }}) - er würde bei Auslösung die komplette Gruppe blocken und einen zu langen Apache-Reload auslösen. Nutzen Sie stattdessen Scraper's Pain.</p>
+            {{ end }}
             {{ with .autoBlockMonitor }}
               <p>
                 Aktuelle Messung: Ø {{ printf "%.2f" .AvgRPS }} req/s
@@ -58,35 +66,6 @@
                   (Datenbasis wird aufgebaut: {{ printf "%.1f" .WindowCoverage.Minutes }} von {{ $.autoBlockWindowMinutes }} Minuten erfasst)
                 {{ end }}
               </p>
-            {{ end }}
-            {{ with .autoBlockSettings }}
-              {{ if .Enabled }}
-                {{ if eq .Mode $.autoBlockModeScraperPain }}
-                  <p>
-                    <strong>Scraper's Pain</strong> ist aktiviert (Umfang {{ .ScraperPainPercent }} % der Pools,
-                    Blockdauer {{ $.autoBlockMinMinutes }}-{{ $.autoBlockMaxMinutes }} Minuten).
-                    {{ if .Active }}
-                      Aktuell {{ len $.scraperPainActivePools }} Pool(s) geblockt{{ if .TriggeredUntil }}, nächste Neuauswahl um {{ .TriggeredUntil.Format "2006-01-02 15:04:05" }}{{ end }}.
-                      {{ if $.scraperPainActivePools }}
-                        <details>
-                          <summary>Aktuell geblockte Pools anzeigen</summary>
-                          <ul>
-                            {{ range $.scraperPainActivePools }}<li>{{ . }}</li>{{ end }}
-                          </ul>
-                        </details>
-                      {{ end }}
-                    {{ end }}
-                  </p>
-                {{ else }}
-                  <p>
-                    AutoBlock (Schwellwert-basiert) ist <strong>aktiviert</strong> (Schwellwert {{ printf "%.0f" .ThresholdRPS }} req/s,
-                    Blockdauer {{ $.autoBlockMinMinutes }}-{{ $.autoBlockMaxMinutes }} Minuten).
-                    {{ if .Active }}
-                      Aktuell automatisch geblockt{{ if .TriggeredUntil }} bis {{ .TriggeredUntil.Format "2006-01-02 15:04:05" }}{{ end }}.
-                    {{ end }}
-                  </p>
-                {{ end }}
-              {{ end }}
             {{ end }}
             {{ if .autoBlockLockedBy }}
               <div class="alert alert-error">
@@ -106,7 +85,7 @@
               </div>
               <div class="field-group">
                 <label>
-                  <input type="radio" name="mode" value="{{ .autoBlockModeThreshold }}" id="abModeThreshold" {{ if not .autoBlockMonitorAvailable }}disabled{{ end }} {{ if or (not .autoBlockSettings) (eq .autoBlockSettings.Mode .autoBlockModeThreshold) }}checked{{ end }} onchange="fairdbUpdateAutoBlockMode()">
+                  <input type="radio" name="mode" value="{{ .autoBlockModeThreshold }}" id="abModeThreshold" {{ if or (not .autoBlockMonitorAvailable) .thresholdGroupTooLarge }}disabled{{ end }} {{ if or (not .autoBlockSettings) (eq .autoBlockSettings.Mode .autoBlockModeThreshold) }}checked{{ end }} onchange="fairdbUpdateAutoBlockMode()">
                   Schwellwert-basiert
                 </label>
                 <label>
@@ -121,7 +100,8 @@
               </div>
               <div class="field-group" id="abScraperPainGroup">
                 <label for="abScraperPainPercent">Umfang (% der Pools)</label>
-                <input type="number" step="1" min="1" max="100" id="abScraperPainPercent" name="scraperPainPercent" value="{{ if .autoBlockSettings }}{{ .autoBlockSettings.ScraperPainPercent }}{{ end }}">
+                <input type="number" step="1" min="1" max="100" id="abScraperPainPercent" name="scraperPainPercent" value="{{ if .autoBlockSettings }}{{ .autoBlockSettings.ScraperPainPercent }}{{ end }}" oninput="fairdbUpdateScraperPainCount()">
+                <span class="hint" id="abScraperPainCount"></span>
               </div>
               <div class="field-group">
                 <label for="abMin">Blockdauer min (Minuten)</label>
@@ -155,10 +135,52 @@
                   document.getElementById('abThresholdGroup').style.display = scraperPain ? 'none' : '';
                   document.getElementById('abScraperPainGroup').style.display = scraperPain ? '' : 'none';
                 };
+                var totalPools = {{ len .pools }};
+                var scraperPainMaxPools = {{ .scraperPainMaxPools }};
+                window.fairdbUpdateScraperPainCount = function () {
+                  var input = document.getElementById('abScraperPainPercent');
+                  var out = document.getElementById('abScraperPainCount');
+                  var percent = parseInt(input.value, 10);
+                  if (!isFinite(percent) || percent <= 0 || totalPools <= 0) {
+                    out.textContent = '';
+                    return;
+                  }
+                  var count = Math.ceil(totalPools * percent / 100);
+                  if (count < 1) count = 1;
+                  if (count > totalPools) count = totalPools;
+                  var capped = scraperPainMaxPools > 0 && count > scraperPainMaxPools;
+                  if (capped) count = scraperPainMaxPools;
+                  out.textContent = '≈ ' + count + ' von ' + totalPools + ' Pools (individuell whitelistete Pools zählen nicht mit)' + (capped ? ' - begrenzt durch scraperPainMaxPools=' + scraperPainMaxPools : '');
+                };
                 fairdbUpdateAutoBlockRange();
                 fairdbUpdateAutoBlockMode();
+                fairdbUpdateScraperPainCount();
               })();
             </script>
+          </section>
+
+          <section class="card">
+            <h3>Manuelle Aktionen</h3>
+            <div class="menu">
+              {{ if ne .groupStatus "w" }}
+                <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/whitelist" onsubmit="return confirm('Das whitelisted die gesamte Gruppe und lädt Apache neu! Sicher?');">
+                  <button type="submit" class="btn-green">Gruppe whitelisten</button>
+                </form>
+              {{ end }}
+              {{ if ne .groupStatus "b" }}
+                <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/block" onsubmit="return confirm('Das blockt die gesamte Gruppe und lädt Apache neu! Sicher?');">
+                  <button type="submit" class="btn-block">Gruppe blocken</button>
+                </form>
+              {{ end }}
+              {{ if or (ne .groupStatus "") (and .autoBlockSettings .autoBlockSettings.Enabled) }}
+                <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/deactivate" onsubmit="return confirm('Das setzt die gesamte Gruppe inaktiv und lädt Apache neu! Sicher?');">
+                  <button type="submit" class="btn-grey">Gruppe inaktiv setzen</button>
+                </form>
+              {{ end }}
+            </div>
+            <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/activate">
+              <button type="submit" class="btn-grey">Gruppe aktivieren (Export + Apache-Reload)</button>
+            </form>
           </section>
 
           <section class="card">
@@ -189,36 +211,15 @@
             </form>
           </section>
 
-        </div>
-        <div class="grid-right">
-
-          <section class="card status-row">
-            <p>Status:
-              {{ if eq .groupStatus "w" }} whitelisted
-              {{ else if eq .groupStatus "b" }} blocked
-              {{ else }} inaktiv
-              {{ end }}
-            </p>
-            <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/activate">
-              <button type="submit" class="btn-grey">Gruppe aktivieren (Export + Apache-Reload)</button>
-            </form>
-          </section>
-
-          <section class="card menu">
-            {{ if ne .groupStatus "w" }}
-              <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/whitelist" onsubmit="return confirm('Das whitelisted die gesamte Gruppe und lädt Apache neu! Sicher?');">
-                <button type="submit" class="btn-green">Gruppe whitelisten</button>
-              </form>
-            {{ end }}
-            {{ if ne .groupStatus "b" }}
-              <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/block" onsubmit="return confirm('Das blockt die gesamte Gruppe und lädt Apache neu! Sicher?');">
-                <button type="submit" class="btn-block">Gruppe blocken</button>
-              </form>
-            {{ end }}
+          <section class="card">
+            <h3>Gruppe löschen</h3>
             <form method="post" action="{{ $.BasePath }}/admin/groups/{{ .group }}/delete" onsubmit="return confirm('Das löscht die Gruppe (Pools bleiben, werden aber ungruppiert)! Sicher?');">
               <button type="submit" class="btn-danger">Gruppe löschen</button>
             </form>
           </section>
+
+        </div>
+        <div class="grid-right">
 
           <section class="card">
             <h3>{{ len .pools }} Pools in dieser Gruppe</h3>
@@ -235,9 +236,12 @@
                   <tr>
                     <td><a href="{{ $.BasePath }}/admin/pools/{{ .Name }}">{{ .Name }}</a></td>
                     <td>
-                      {{ if eq .Status "w" }} whitelisted
-                      {{ else if eq .Status "b" }} blocked
-                      {{ else }} gemischt/inaktiv
+                      {{ if eq .Status "w" }}
+                        <span class="pool-status-w">whitelisted</span>
+                      {{ else if eq .Status "b" }}
+                        <span class="pool-status-b">blocked</span>
+                      {{ else }}
+                        <span class="pool-status-inactive">gemischt/inaktiv</span>
                       {{ end }}
                       {{ if .ScraperPainActive }} <span class="hint">(Scraper's Pain)</span>{{ end }}
                     </td>

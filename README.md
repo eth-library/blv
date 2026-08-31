@@ -229,6 +229,7 @@ autoBlock:
   measureIntervalSeconds: 30   # y: wie oft neu gemessen/geprüft wird
   measureWindowMinutes: 10     # x: gleitendes Zeitfenster des Durchschnitts
   thresholdVariancePercent: 30 # +- Zufallsanteil auf den je Gruppe konfigurierten Schwellwert
+  scraperPainMaxPools: 500     # Obergrenze für Scraper's Pain UND max. Gruppengröße für den Schwellwert-Modus, siehe unten
 ```
 Ein leerer `statusURL` deaktiviert nur den Schwellwert-Modus (kein Overhead,
 die Option ist im WebUI ausgegraut) - Scraper's Pain bleibt davon unberührt
@@ -269,6 +270,15 @@ Dauer daraus gewählt). Intern (DB, Auswertung) wird die Blockdauer
 weiterhin in Sekunden gehalten - die Umrechnung erfolgt ausschließlich an
 der WebUI-Formulargrenze.
 
+Für Gruppen mit mehr Pools als `scraperPainMaxPools` (Default 500) ist der
+Schwellwert-Modus **nicht aktivierbar** (Option im WebUI ausgegraut, Server
+lehnt einen direkten API-/Formular-Versuch ebenfalls ab): er blockt bei
+Auslösung immer die komplette Gruppe, und eine so große Blockliste würde den
+in der Praxis beobachteten sehr langen Apache-Reload auslösen (Apache parst
+`Require [not] ip`-Direktiven beim Reload, nicht pro Request - die
+Reload-Dauer hängt also an der Zeilenzahl). Für solche Gruppen bleibt nur
+Scraper's Pain nutzbar, das die Blockmenge selbst begrenzt (siehe unten).
+
 Egal welcher Modus: es darf **immer nur eine einzige Gruppe gleichzeitig**
 AutoBlock aktiviert haben. Im Schwellwert-Modus, weil die Ratenmessung
 serverweit ist und nicht zwischen Gruppen unterscheidet - sonst würden
@@ -304,12 +314,25 @@ Zufallsauswahl einbezogen, auch wenn sie formal zur Gruppe gehören - analog
 dazu, dass eine whitelistete Gruppe im Schwellwert-Modus nie automatisch
 geblockt wird. Der Gruppenstatus selbst bleibt während Scraper's Pain
 durchgängig inaktiv (`""`); nur einzelne Pools wechseln zwischen geblockt und
-inaktiv, die Gruppen-Detailseite zeigt das als "gemischt/inaktiv" mit den
-aktuell geblockten Pools separat aufgelistet.
+inaktiv, die Gruppen-Detailseite markiert das farbig in der Pools-Tabelle
+(rot geblockt, grau inaktiv) und zeigt die aktuelle Blockanzahl im
+Status-Banner ganz oben.
 
 Sehr kurze Blockdauern (wenige Sekunden/Minuten) führen zu entsprechend
 häufigen Export- und Apache-Reload-Vorgängen - für den produktiven Einsatz
 empfiehlt sich eine Blockdauer-Spanne im Minuten- bis Stunden-Bereich.
+
+**`scraperPainMaxPools`** deckelt zusätzlich, wie viele Pools ein einzelner
+Zyklus höchstens gleichzeitig blockt - unabhängig vom konfigurierten Umfang
+in %. Grund: Apache parst `Require [not] ip`-Direktiven beim Reload (nicht
+pro Request), die Reload-Dauer hängt also an der Zahl der Direktiven in der
+exportierten `.conf`-Datei, nicht an der Gruppengröße selbst. Bei sehr
+großen Gruppen (mehrere tausend Pools) würde ein hoher Umfang-Prozentsatz
+sonst bei jedem Zyklus eine entsprechend große, langsam zu ladende Blockliste
+erzeugen. `0` oder ein negativer Wert deaktiviert die Grenze. Der
+Schwellwert-Modus ist von dieser Grenze **nicht** betroffen - er blockt bei
+Auslösung bewusst immer die komplette Gruppe, um den Scraping-Schutz nicht
+zu schwächen.
 
 ## API
 Ein Bearer-Auth-geschütztes JSON-API steht unter `/api/v1` bereit (Token

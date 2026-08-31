@@ -35,6 +35,7 @@ type Manager struct {
 	monitor         *RateMonitor
 	interval        time.Duration
 	variancePercent int
+	scraperPainMax  int
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
@@ -47,8 +48,15 @@ func NewManager(ctx context.Context, database *sql.DB, monitor *RateMonitor, cfg
 		monitor:         monitor,
 		interval:        time.Duration(cfg.MeasureIntervalSeconds) * time.Second,
 		variancePercent: cfg.ThresholdVariancePercent,
+		scraperPainMax:  cfg.ScraperPainMaxPools,
 		cancels:         make(map[string]context.CancelFunc),
 	}
+}
+
+// ScraperPainMaxPools gibt das konfigurierte Limit zurück (0/negativ = kein
+// Limit) - z. B. für die Live-Anzeige im WebUI (siehe addAutoBlockContext).
+func (m *Manager) ScraperPainMaxPools() int {
+	return m.scraperPainMax
 }
 
 // Monitor gibt den zugrundeliegenden RateMonitor zurück (z. B. für die
@@ -97,16 +105,51 @@ func (m *Manager) StartAll() error {
 // zusätzlich hart in der DB, falls zwei Admin-Requests diese Prüfung
 // gleichzeitig passieren.
 func (m *Manager) Save(groupName string, enabled bool, mode string, thresholdRPS float64, scraperPainPercent int, minSeconds, maxSeconds int) error {
+	existing, err := db.GetAutoBlockSettings(m.database, groupName)
+	if err != nil {
+		return err
+	}
+
 	if enabled {
 		if mode == ModeThreshold && m.monitor == nil {
 			return fmt.Errorf("Schwellwert-basierter AutoBlock ist nicht konfiguriert (keine statusURL) - für diese Gruppe steht nur Scraper's Pain zur Verfügung")
 		}
-		existing, found, err := db.GetEnabledAutoBlockGroup(m.database)
+		// Der Schwellwert-Modus blockt bei Auslösung immer die komplette
+		// Gruppe (siehe evaluateThreshold/functions.BlockGroup) - bei sehr
+		// großen Gruppen würde das denselben zu langen Apache-Reload
+		// auslösen, den scraperPainMax für Scraper's Pain gerade begrenzt.
+		// Dasselbe Limit gilt daher auch hier als Obergrenze für die
+		// Gruppengröße, nicht als Obergrenze für die Blockmenge.
+		if mode == ModeThreshold && m.scraperPainMax > 0 {
+			poolNames, err := db.ListPoolNamesInGroup(m.database, groupName)
+			if err != nil {
+				return err
+			}
+			if len(poolNames) > m.scraperPainMax {
+				return fmt.Errorf("Schwellwert-basierter AutoBlock ist für Gruppen mit mehr als %d Pools deaktiviert (aktuell %d Pools) - der volle Gruppen-Block würde einen zu langen Apache-Reload auslösen. Nutzen Sie stattdessen Scraper's Pain", m.scraperPainMax, len(poolNames))
+			}
+		}
+		enabledGroup, found, err := db.GetEnabledAutoBlockGroup(m.database)
 		if err != nil {
 			return err
 		}
-		if found && existing != groupName {
-			return fmt.Errorf("AutoBlock ist bereits für Gruppe %q aktiviert - es darf immer nur eine Gruppe gleichzeitig aktiv sein", existing)
+		if found && enabledGroup != groupName {
+			return fmt.Errorf("AutoBlock ist bereits für Gruppe %q aktiviert - es darf immer nur eine Gruppe gleichzeitig aktiv sein", enabledGroup)
+		}
+
+		// Übergang deaktiviert -> aktiviert ("Haken setzen"): die Gruppe
+		// zuerst auf inaktiv zurücksetzen, egal welcher manuelle Zustand
+		// vorher galt (whitelisted/blocked/inaktiv) - AutoBlock übernimmt
+		// immer mit sauberer Baseline (siehe Plan "Entweder AutoBlock oder
+		// manuell"). Fehler hier werden nur geloggt, nicht zurückgegeben -
+		// eine fehlgeschlagene Reload soll das Aktivieren von AutoBlock
+		// selbst nicht verhindern.
+		if existing == nil || !existing.Enabled {
+			if _, _, deactivateErr, reloadErr := functions.DeactivateGroup(m.database, groupName); deactivateErr != nil {
+				app.LogIt.Error(fmt.Sprintf("AutoBlock %s: Baseline-Reset vor Aktivierung fehlgeschlagen: %v", groupName, deactivateErr))
+			} else if reloadErr != nil {
+				app.LogIt.Error(fmt.Sprintf("AutoBlock %s: Baseline-Reset erfolgreich, aber Apache-Reload fehlgeschlagen: %v", groupName, reloadErr))
+			}
 		}
 	} else if err := m.stopAndRevertIfActive(groupName); err != nil {
 		return err
@@ -117,9 +160,7 @@ func (m *Manager) Save(groupName string, enabled bool, mode string, thresholdRPS
 	// Zustand zuerst modusgerecht zurücksetzen - sonst bliebe ein veralteter
 	// Active/TriggeredUntil-Zustand bis zu dessen ursprünglichem Ablauf
 	// bestehen und würde die neue Konfiguration nicht ausgewertet.
-	if existing, err := db.GetAutoBlockSettings(m.database, groupName); err != nil {
-		return err
-	} else if existing != nil && existing.Active && existing.Mode != mode {
+	if existing != nil && existing.Active && existing.Mode != mode {
 		m.revertMode(groupName, existing.Mode)
 	}
 
@@ -309,7 +350,8 @@ func (m *Manager) startScraperPainCycle(groupName string, settings *db.AutoBlock
 		return
 	}
 
-	count := scraperPainCount(len(candidates), settings.ScraperPainPercent)
+	count := scraperPainCount(len(candidates), settings.ScraperPainPercent, m.scraperPainMax)
+	uncappedCount := scraperPainCount(len(candidates), settings.ScraperPainPercent, 0)
 	rand.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
 	selected := candidates[:count]
 	stillSelected := make(map[string]bool, len(selected))
@@ -351,13 +393,21 @@ func (m *Manager) startScraperPainCycle(groupName string, settings *db.AutoBlock
 	} else if reloadErr != nil {
 		app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Apache-Reload fehlgeschlagen: %v", groupName, reloadErr))
 	}
-	app.LogIt.Info(fmt.Sprintf("Scraper's Pain %s: %d von %d Pools geblockt bis %s", groupName, len(selected), len(candidates), until.Format(time.RFC3339)))
+	capNote := ""
+	if count < uncappedCount {
+		capNote = fmt.Sprintf(" (Umfang wäre %d gewesen, auf scraperPainMaxPools=%d begrenzt)", uncappedCount, m.scraperPainMax)
+	}
+	app.LogIt.Info(fmt.Sprintf("Scraper's Pain %s: %d von %d Pools geblockt bis %s%s", groupName, len(selected), len(candidates), until.Format(time.RFC3339), capNote))
 }
 
 // scraperPainCount rechnet den konfigurierten Prozentanteil in eine
 // konkrete Pool-Anzahl um: aufgerundet, mindestens 1 (sofern Kandidaten
-// vorhanden), höchstens alle Kandidaten.
-func scraperPainCount(total, percent int) int {
+// vorhanden), höchstens alle Kandidaten - und danach zusätzlich auf maxPools
+// gedeckelt (0/negativ = kein Limit). Der Deckel schützt vor sehr langen
+// Apache-Reloads bei sehr großen Gruppen: die Reload-Dauer hängt an der Zahl
+// der Require-Direktiven in der exportierten .conf-Datei, siehe
+// app.AutoBlockConfig.ScraperPainMaxPools.
+func scraperPainCount(total, percent, maxPools int) int {
 	if total <= 0 {
 		return 0
 	}
@@ -367,6 +417,9 @@ func scraperPainCount(total, percent int) int {
 	}
 	if count > total {
 		count = total
+	}
+	if maxPools > 0 && count > maxPools {
+		count = maxPools
 	}
 	return count
 }

@@ -52,15 +52,29 @@ type LogConfig struct {
 	LogFolder string `yaml:"LogFolder"`
 }
 
-// AutoBlockConfig steuert die serverweite Request-Ratenmessung (Basis für den
-// automatischen Scraping-Schutz je Gruppe, siehe internal/autoblock). Leerer
-// StatusURL deaktiviert das Feature komplett - es wird dann weder ein
-// RateMonitor noch ein autoblock.Manager gestartet.
+// AutoBlockConfig steuert den automatischen Scraping-Schutz je Gruppe (siehe
+// internal/autoblock). StatusURL/MeasureIntervalSeconds/MeasureWindowMinutes/
+// ThresholdVariancePercent betreffen nur den Schwellwert-Modus - leerer
+// StatusURL deaktiviert nur diesen Modus (kein RateMonitor), Scraper's Pain
+// bleibt unabhängig davon nutzbar. ScraperPainMaxPools gilt für beide Modi
+// unabhängig von einer statusURL.
 type AutoBlockConfig struct {
 	StatusURL                string `yaml:"statusURL"`
 	MeasureIntervalSeconds   int    `yaml:"measureIntervalSeconds"`
 	MeasureWindowMinutes     int    `yaml:"measureWindowMinutes"`
 	ThresholdVariancePercent int    `yaml:"thresholdVariancePercent"`
+	// ScraperPainMaxPools begrenzt zweierlei, beides aus demselben Grund:
+	// Apache parst Require-[not]-ip-Direktiven beim Reload (nicht pro
+	// Request), die Reload-Dauer hängt also an der Zahl der Direktiven in
+	// der exportierten .conf-Datei, nicht an der Gruppengröße selbst.
+	//  1. ModeScraperPain: wie viele Pools ein einzelner Zyklus höchstens
+	//     gleichzeitig blockt, unabhängig vom konfigurierten Umfang in %.
+	//  2. ModeThreshold: die maximale Gruppengröße, ab der der Modus
+	//     überhaupt aktivierbar ist (siehe Manager.Save) - er blockt bei
+	//     Auslösung immer die komplette Gruppe und kann eine Blockliste
+	//     daher nicht wie Scraper's Pain selbst begrenzen.
+	// 0 oder negativ bedeutet "kein Limit" (beide Fälle).
+	ScraperPainMaxPools int `yaml:"scraperPainMaxPools"`
 }
 
 func Initialize(appName string, cfgPath string) {
@@ -132,6 +146,7 @@ func (config *ApplicationConfig) setDefaults() {
 			MeasureIntervalSeconds:   30,
 			MeasureWindowMinutes:     10,
 			ThresholdVariancePercent: 30,
+			ScraperPainMaxPools:      500,
 		},
 	}
 }

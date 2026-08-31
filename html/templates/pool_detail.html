@@ -53,6 +53,11 @@
             <button type="submit" class="btn-block">gesamten Pool blocken</button>
           </form>
         {{ end }}
+        {{ if ne .poolStatus "" }}
+          <form method="post" action="{{ $.BasePath }}/admin/pools/{{ .pool }}/deactivate" onsubmit="return confirm('Das ändert den gesamten Pool! Sicher?');">
+            <button type="submit" class="btn-grey">gesamten Pool inaktiv setzen</button>
+          </form>
+        {{ end }}
         <form method="post" action="{{ $.BasePath }}/admin/pools/{{ .pool }}/delete" onsubmit="return confirm('Das löscht den gesamten Pool! Sicher?');">
           <button type="submit" class="btn-danger">gesamten Pool Löschen</button>
         </form>

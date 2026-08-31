@@ -222,6 +222,52 @@ button[type="submit"]:hover {
   color: var(--muted);
 }
 
+/* Status-Banner (Gruppen-Detailseite) */
+
+.status-banner-label {
+  margin: 0;
+  font-size: 1.3rem;
+  font-weight: 700;
+}
+
+.status-banner-detail {
+  margin: 0.25rem 0 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.status-banner--status-whitelisted .status-banner-label {
+  color: var(--success);
+}
+
+.status-banner--status-blocked .status-banner-label {
+  color: var(--error);
+}
+
+.status-banner--status-inactive .status-banner-label {
+  color: var(--muted);
+}
+
+.status-banner--status-scraperpain .status-banner-label {
+  color: var(--accent);
+}
+
+/* Pool-Status (Gruppen-Detailseite, Pools-Tabelle) */
+
+.pool-status-w {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.pool-status-b {
+  color: var(--error);
+  font-weight: 600;
+}
+
+.pool-status-inactive {
+  color: var(--muted);
+}
+
 /* Buttons */
 
 button.btn-green {

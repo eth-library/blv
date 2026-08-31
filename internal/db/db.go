@@ -700,7 +700,16 @@ func SyncGroupStatusesFromPools(database *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	type counts struct{ w, b int }
+	// total zählt alle Einträge der Gruppe (jeder Status), nicht nur w/b -
+	// ohne total wäre "nur b" (siehe Doc-Kommentar oben) nicht von "b und
+	// daneben noch inaktive Einträge" unterscheidbar. Genau letzteres ist
+	// seit Scraper's Pain (siehe internal/autoblock) der Normalfall: dort
+	// ist immer nur ein zufälliger Teil der Pools "b", der Rest bleibt "" -
+	// ohne total-Prüfung würde dieser Sync-Lauf (bei jedem Programmstart,
+	// siehe functions.SyncDBWithApacheState) die Gruppe fälschlich auf
+	// vollständig "b" setzen und damit die Scraper's-Pain-Teilauswahl
+	// überschreiben.
+	type counts struct{ w, b, total int }
 	byGroup := make(map[string]*counts)
 	for rows.Next() {
 		var groupName, status string
@@ -714,6 +723,7 @@ func SyncGroupStatusesFromPools(database *sql.DB) error {
 			c = &counts{}
 			byGroup[groupName] = c
 		}
+		c.total += n
 		switch status {
 		case "w":
 			c.w = n
@@ -729,11 +739,10 @@ func SyncGroupStatusesFromPools(database *sql.DB) error {
 
 	for groupName, c := range byGroup {
 		status := ""
-		if c.w == 0 && c.b != 0 {
-			status = "b"
-		}
-		if c.b == 0 && c.w != 0 {
+		if c.w == c.total {
 			status = "w"
+		} else if c.b == c.total {
+			status = "b"
 		}
 		if err := SetGroupStatus(database, groupName, status); err != nil {
 			return err
