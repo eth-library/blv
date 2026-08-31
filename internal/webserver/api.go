@@ -4,9 +4,12 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"net/http"
+	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/SvenKethz/fairdb/internal/autoblock"
 	app "github.com/SvenKethz/fairdb/internal/configuration"
 	"github.com/SvenKethz/fairdb/internal/db"
 	"github.com/SvenKethz/fairdb/internal/functions"
@@ -38,10 +41,11 @@ func bearerAuth() gin.HandlerFunc {
 }
 
 // RegisterAPIRoutes registriert das Bearer-Auth-geschützte JSON-API unter
-// /api/v1 (Gruppen-Status abfragen bzw. block/whitelist/deactivate setzen).
-// Pools werden bewusst ausschließlich über die WebUI verwaltet, nicht über
-// dieses API.
-func RegisterAPIRoutes(r *gin.RouterGroup, database *sql.DB) {
+// /api/v1 (Gruppen-Status abfragen, block/whitelist/deactivate setzen, sowie
+// eine .conf-Datei als neuen bzw. ergänzten Pool zu einer Gruppe hochladen -
+// siehe POST .../pools). Einzelne Pool-Einträge (IP-Ebene) bleiben bewusst
+// der WebUI vorbehalten.
+func RegisterAPIRoutes(r *gin.RouterGroup, database *sql.DB, autoBlockManager *autoblock.Manager) {
 	api := r.Group("/api/v1", bearerAuth())
 
 	api.GET("/groups/:name", func(c *gin.Context) {
@@ -73,9 +77,10 @@ func RegisterAPIRoutes(r *gin.RouterGroup, database *sql.DB) {
 
 	api.POST("/groups/:name/block", func(c *gin.Context) {
 		groupName := c.Param("name")
-		// Eine manuelle API-Aktion hat Vorrang vor einem laufenden AutoBlock -
-		// sonst würde dessen Revert-Timer sie später überschreiben.
-		_ = db.ClearAutoBlockActive(database, groupName)
+		// AutoBlock und manuelle Aktionen schließen sich gegenseitig aus
+		// (siehe disableAutoBlockForGroup) - eine manuelle API-Aktion schaltet
+		// einen laufenden AutoBlock komplett ab, nicht nur den aktuellen Block.
+		disableAutoBlockForGroup(database, autoBlockManager, groupName)
 		wCount, bCount, err, reloadErr := functions.BlockGroup(database, groupName)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -90,7 +95,7 @@ func RegisterAPIRoutes(r *gin.RouterGroup, database *sql.DB) {
 
 	api.POST("/groups/:name/whitelist", func(c *gin.Context) {
 		groupName := c.Param("name")
-		_ = db.ClearAutoBlockActive(database, groupName)
+		disableAutoBlockForGroup(database, autoBlockManager, groupName)
 		conflicts, wCount, bCount, err, reloadErr := functions.WhitelistGroup(database, groupName)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -112,7 +117,7 @@ func RegisterAPIRoutes(r *gin.RouterGroup, database *sql.DB) {
 
 	api.POST("/groups/:name/deactivate", func(c *gin.Context) {
 		groupName := c.Param("name")
-		_ = db.ClearAutoBlockActive(database, groupName)
+		disableAutoBlockForGroup(database, autoBlockManager, groupName)
 		wCount, bCount, err, reloadErr := functions.DeactivateGroup(database, groupName)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -125,4 +130,62 @@ func RegisterAPIRoutes(r *gin.RouterGroup, database *sql.DB) {
 		c.JSON(http.StatusOK, resp)
 	})
 
+	// POST .../pools: eine .conf/.txt-Datei als neuen (oder ergänzten, falls
+	// der Poolname bereits existiert) Pool importieren und dieser Gruppe
+	// zuweisen - API-Äquivalent zum WebUI-Formular "Datei in diese Gruppe
+	// hochladen" (siehe admin.POST(".../uploadPool") in webserver.go, gleiche
+	// Funktionen darunter: functions.ImportConf + db.AssignPoolToGroup).
+	// Löst bewusst KEINEN Export/Apache-Reload aus (wie das WebUI-Pendant) -
+	// dafür anschließend block/whitelist/deactivate aufrufen.
+	api.POST("/groups/:name/pools", func(c *gin.Context) {
+		groupName := c.Param("name")
+		fileHeader, err := c.FormFile("file")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Datei wurde nicht übermittelt (Feld 'file' erwartet)"})
+			return
+		}
+
+		poolName := strings.TrimSpace(c.PostForm("poolName"))
+		if poolName == "" {
+			poolName = strings.TrimSuffix(fileHeader.Filename, filepath.Ext(fileHeader.Filename))
+		}
+		if poolName == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "kein Poolname ermittelbar (weder 'poolName' noch aus dem Dateinamen)"})
+			return
+		}
+
+		status := c.PostForm("status")
+		if status != "" && status != "w" && status != "b" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "ungültiger status - erlaubt sind 'w', 'b' oder leer (inaktiv)"})
+			return
+		}
+
+		f, err := fileHeader.Open()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Datei konnte nicht geöffnet werden: " + err.Error()})
+			return
+		}
+		defer f.Close()
+
+		if err := functions.ImportConf(database, f, poolName, status); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Importfehler: " + err.Error()})
+			return
+		}
+		if err := db.AssignPoolToGroup(database, poolName, groupName); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Pool importiert, aber Gruppenzuweisung fehlgeschlagen: " + err.Error()})
+			return
+		}
+		entries, err := db.ListByPool(database, poolName)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Pool importiert und zugewiesen, aber Nachzählen fehlgeschlagen: " + err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"group":          groupName,
+			"pool":           poolName,
+			"status":         status,
+			"poolEntryCount": len(entries),
+			"note":           "Gruppe wurde nicht automatisch (re-)aktiviert - dafür anschließend block/whitelist/deactivate aufrufen",
+		})
+	})
 }

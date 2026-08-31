@@ -468,6 +468,89 @@ func ListPoolNamesInGroup(dbConn *sql.DB, groupName string) ([]string, error) {
 	return names, rows.Err()
 }
 
+// CountDistinctPoolNamesInGroup liefert die Anzahl unterschiedlicher Pool-
+// Namen einer Gruppe, optional gefiltert per Teilstring (SQLite LIKE ist für
+// ASCII-Buchstaben von Haus aus case-insensitive) - Grundlage für die
+// Pagination der Pools-Tabelle auf der Gruppen-Detailseite.
+func CountDistinctPoolNamesInGroup(dbConn *sql.DB, groupName, filter string) (int, error) {
+	var count int
+	var err error
+	if filter == "" {
+		err = dbConn.QueryRow(`SELECT COUNT(DISTINCT name) FROM pools WHERE group_name = ?`, groupName).Scan(&count)
+	} else {
+		err = dbConn.QueryRow(`SELECT COUNT(DISTINCT name) FROM pools WHERE group_name = ? AND name LIKE ?`, groupName, "%"+filter+"%").Scan(&count)
+	}
+	return count, err
+}
+
+// ListPoolNamesInGroupPage liefert eine alphabetisch sortierte Seite
+// (limit/offset) der unterschiedlichen Pool-Namen einer Gruppe, optional
+// gefiltert per Teilstring - siehe CountDistinctPoolNamesInGroup.
+func ListPoolNamesInGroupPage(dbConn *sql.DB, groupName, filter string, limit, offset int) ([]string, error) {
+	var rows *sql.Rows
+	var err error
+	if filter == "" {
+		rows, err = dbConn.Query(`SELECT DISTINCT name FROM pools WHERE group_name = ? ORDER BY name LIMIT ? OFFSET ?`, groupName, limit, offset)
+	} else {
+		rows, err = dbConn.Query(`SELECT DISTINCT name FROM pools WHERE group_name = ? AND name LIKE ? ORDER BY name LIMIT ? OFFSET ?`, groupName, "%"+filter+"%", limit, offset)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, err
+		}
+		names = append(names, n)
+	}
+	return names, rows.Err()
+}
+
+// PoolStatusCounts liefert je Namen aus poolNames die Anzahl der Einträge
+// mit Status "w" bzw. "b" - eine einzige Query für beliebig viele Pools
+// einer Gruppe, statt (wie früher) eine Query pro Pool. Für eine sehr große
+// Gruppe (mehrere tausend Pools) war das zuvor die eigentliche Bremse beim
+// Laden der Gruppen-Detailseite, nicht die Größe der gerenderten Tabelle.
+func PoolStatusCounts(dbConn *sql.DB, groupName string, poolNames []string) (map[string]struct{ W, B int }, error) {
+	counts := make(map[string]struct{ W, B int }, len(poolNames))
+	if len(poolNames) == 0 {
+		return counts, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(poolNames)), ",")
+	args := make([]any, 0, len(poolNames)+1)
+	args = append(args, groupName)
+	for _, n := range poolNames {
+		args = append(args, n)
+	}
+	query := fmt.Sprintf(`SELECT name, status, COUNT(*) FROM pools WHERE group_name = ? AND name IN (%s) GROUP BY name, status`, placeholders)
+	rows, err := dbConn.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var name, status string
+		var n int
+		if err := rows.Scan(&name, &status, &n); err != nil {
+			return nil, err
+		}
+		c := counts[name]
+		switch status {
+		case "w":
+			c.W = n
+		case "b":
+			c.B = n
+		}
+		counts[name] = c
+	}
+	return counts, rows.Err()
+}
+
 // GetPoolGroup liefert die Gruppe, der ein (bereits existierender) Pool
 // zugeordnet ist. found=false, wenn der Pool noch keine Einträge hat.
 func GetPoolGroup(dbConn *sql.DB, poolName string) (groupName string, found bool, err error) {

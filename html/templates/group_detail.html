@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="{{ $.BasePath }}/static/styles.css">
 </head>
 <body>
-  <header>
+  <header id="top">
     <div class="container">
       <h1>{{ .title }}</h1>
     </div>
@@ -15,6 +15,7 @@
       <ul class="menu container">
         <li><a href="{{ $.BasePath }}/" class="link-back">Zurück zur Startseite</a></li>
         <li><a href="{{ $.BasePath }}/admin/groups" class="link-back">Zurück zur Gruppenübersicht</a></li>
+        <li><a href="#poolsCard" class="link-back">↓ Zur Pool-Liste</a></li>
       </ul>
 
   <main>
@@ -135,7 +136,7 @@
                   document.getElementById('abThresholdGroup').style.display = scraperPain ? 'none' : '';
                   document.getElementById('abScraperPainGroup').style.display = scraperPain ? '' : 'none';
                 };
-                var totalPools = {{ len .pools }};
+                var totalPools = {{ .groupPoolCount }};
                 var scraperPainMaxPools = {{ .scraperPainMaxPools }};
                 window.fairdbUpdateScraperPainCount = function () {
                   var input = document.getElementById('abScraperPainPercent');
@@ -221,8 +222,22 @@
         </div>
         <div class="grid-right">
 
-          <section class="card">
-            <h3>{{ len .pools }} Pools in dieser Gruppe</h3>
+          <section class="card" id="poolsCard">
+            <h3>
+              {{ if .poolsFilter }}
+                {{ .poolsTotal }} von {{ .groupPoolCount }} Pools gefunden
+              {{ else }}
+                {{ .poolsTotal }} Pools in dieser Gruppe
+              {{ end }}
+            </h3>
+            <form method="get" action="{{ $.BasePath }}/admin/groups/{{ .group }}" class="pools-filter">
+              <div class="field-group">
+                <label for="poolsFilter">Pool-Name filtern</label>
+                <input type="text" id="poolsFilter" name="q" value="{{ .poolsFilter }}" placeholder="Teil des Poolnamens">
+              </div>
+              <button type="submit">Filtern</button>
+              {{ if .poolsFilter }}<a href="{{ $.BasePath }}/admin/groups/{{ .group }}#poolsCard" class="link-back">Filter zurücksetzen</a>{{ end }}
+            </form>
             <div class="table-wrapper">
               <table class="data-table">
                 <thead>
@@ -248,12 +263,24 @@
                   </tr>
                 {{ else }}
                   <tr>
-                    <td colspan="2" class="table-empty">Keine Pools in dieser Gruppe.</td>
+                    <td colspan="2" class="table-empty">Keine Pools gefunden.</td>
                   </tr>
                 {{ end }}
                 </tbody>
               </table>
             </div>
+            {{ if gt .poolsTotalPages 1 }}
+              <div class="pagination">
+                {{ if .poolsHasPrev }}
+                  <a href="{{ $.BasePath }}/admin/groups/{{ .group }}?q={{ .poolsFilter }}&page={{ .poolsPrevPage }}#poolsCard" class="link-back">« Zurück</a>
+                {{ end }}
+                <span class="hint">Seite {{ .poolsPage }} von {{ .poolsTotalPages }}</span>
+                {{ if .poolsHasNext }}
+                  <a href="{{ $.BasePath }}/admin/groups/{{ .group }}?q={{ .poolsFilter }}&page={{ .poolsNextPage }}#poolsCard" class="link-back">Weiter »</a>
+                {{ end }}
+              </div>
+            {{ end }}
+            <p><a href="#top" class="link-back">↑ Nach oben</a></p>
           </section>
 
         </div>

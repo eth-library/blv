@@ -63,8 +63,14 @@ type PoolSummary struct {
 	ScraperPainActive bool   // true, wenn der aktuelle Scraper's-Pain-Zyklus der Gruppe diesen Pool geblockt hat
 }
 
+// poolSummariesForGroup liefert den Status ALLER Pools einer Gruppe in einer
+// Handvoll Queries (nicht mehr eine pro Pool - siehe db.ListByGroup/
+// PoolStatusCounts) - für das API (siehe api.go), das anders als die
+// Gruppen-Detailseite nicht paginiert. Für sehr große Gruppen (mehrere
+// tausend Pools) ist poolSummariesForGroupPage die passendere, echt
+// paginierte Variante.
 func poolSummariesForGroup(database *sql.DB, groupName string) ([]PoolSummary, error) {
-	poolNames, err := db.ListPoolNamesInGroup(database, groupName)
+	entries, err := db.ListByGroup(database, groupName)
 	if err != nil {
 		return nil, err
 	}
@@ -76,23 +82,83 @@ func poolSummariesForGroup(database *sql.DB, groupName string) ([]PoolSummary, e
 	for _, poolName := range scraperPainActive {
 		scraperPainActiveSet[poolName] = true
 	}
-	summaries := make([]PoolSummary, 0, len(poolNames))
-	for _, poolName := range poolNames {
-		entries, err := db.ListByPool(database, poolName)
-		if err != nil {
-			return nil, err
+
+	type counts struct{ w, b int }
+	byName := make(map[string]*counts)
+	var order []string // ListByGroup ist bereits nach name sortiert (ORDER BY name, ...)
+	for _, e := range entries {
+		c, ok := byName[e.Name]
+		if !ok {
+			c = &counts{}
+			byName[e.Name] = c
+			order = append(order, e.Name)
 		}
-		wCount, bCount := functions.GetStatusCount(entries)
+		switch e.Status {
+		case "w":
+			c.w++
+		case "b":
+			c.b++
+		}
+	}
+
+	summaries := make([]PoolSummary, 0, len(order))
+	for _, name := range order {
+		c := byName[name]
 		status := ""
-		if wCount == 0 && bCount != 0 {
+		if c.w == 0 && c.b != 0 {
 			status = "b"
 		}
-		if bCount == 0 && wCount != 0 {
+		if c.b == 0 && c.w != 0 {
 			status = "w"
 		}
-		summaries = append(summaries, PoolSummary{Name: poolName, Status: status, ScraperPainActive: scraperPainActiveSet[poolName]})
+		summaries = append(summaries, PoolSummary{Name: name, Status: status, ScraperPainActive: scraperPainActiveSet[name]})
 	}
 	return summaries, nil
+}
+
+// poolSummariesForGroupPage ist das paginierte, optional per Teilstring
+// gefilterte Pendant für die Gruppen-Detailseite (siehe
+// db.CountDistinctPoolNamesInGroup/ListPoolNamesInGroupPage/PoolStatusCounts):
+// lädt pro Aufruf nur eine Seite von Pool-Namen und deren Status, statt bei
+// sehr großen Gruppen (mehrere tausend Pools) jedes Mal alles zu laden.
+// page ist 1-basiert. total ist die Gesamtzahl der (gefilterten) Pool-Namen,
+// unabhängig von der Seitengröße - Grundlage für die Pagination-Anzeige.
+func poolSummariesForGroupPage(database *sql.DB, groupName, filter string, page, pageSize int) (summaries []PoolSummary, total int, err error) {
+	total, err = db.CountDistinctPoolNamesInGroup(database, groupName, filter)
+	if err != nil || total == 0 {
+		return nil, total, err
+	}
+	offset := (page - 1) * pageSize
+	poolNames, err := db.ListPoolNamesInGroupPage(database, groupName, filter, pageSize, offset)
+	if err != nil {
+		return nil, total, err
+	}
+	counts, err := db.PoolStatusCounts(database, groupName, poolNames)
+	if err != nil {
+		return nil, total, err
+	}
+	scraperPainActive, err := db.GetScraperPainActivePools(database, groupName)
+	if err != nil {
+		return nil, total, err
+	}
+	scraperPainActiveSet := make(map[string]bool, len(scraperPainActive))
+	for _, poolName := range scraperPainActive {
+		scraperPainActiveSet[poolName] = true
+	}
+
+	summaries = make([]PoolSummary, 0, len(poolNames))
+	for _, name := range poolNames {
+		c := counts[name]
+		status := ""
+		if c.W == 0 && c.B != 0 {
+			status = "b"
+		}
+		if c.B == 0 && c.W != 0 {
+			status = "w"
+		}
+		summaries = append(summaries, PoolSummary{Name: name, Status: status, ScraperPainActive: scraperPainActiveSet[name]})
+	}
+	return summaries, total, nil
 }
 
 // addAutoBlockContext reichert ctx um die AutoBlock-Einstellung/den Status
@@ -238,7 +304,7 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 	r.StaticFile("/favicon.ico", app.Config.WebfilesPath+"/static/favicon.ico")
 
 	// Bearer-Auth-geschütztes JSON-API für externe Systeme
-	RegisterAPIRoutes(r, database)
+	RegisterAPIRoutes(r, database, autoBlockManager)
 
 	r.GET("/", func(c *gin.Context) {
 		c.HTML(http.StatusOK, "index.html", gin.H{
@@ -441,7 +507,13 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 			})
 			return
 		}
-		pools, err := poolSummariesForGroup(database, groupName)
+		filter := strings.TrimSpace(c.Query("q"))
+		page, _ := strconv.Atoi(c.Query("page"))
+		if page < 1 {
+			page = 1
+		}
+		const poolsPageSize = 200
+		pools, poolsTotal, err := poolSummariesForGroupPage(database, groupName, filter, page, poolsPageSize)
 		if err != nil {
 			c.HTML(http.StatusInternalServerError, "group_detail.html", gin.H{
 				"title":    "Gruppe " + groupName,
@@ -450,14 +522,31 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 			})
 			return
 		}
+		poolsTotalPages := (poolsTotal + poolsPageSize - 1) / poolsPageSize
+		if poolsTotalPages < 1 {
+			poolsTotalPages = 1
+		}
+		if page > poolsTotalPages {
+			page = poolsTotalPages
+		}
 		ctx := gin.H{
-			"title":       "Gruppe " + groupName,
-			"group":       groupName,
-			"groupStatus": status,
-			"pools":       pools,
-			"error":       c.Query("error"),
-			"message":     c.Query("message"),
-			"BasePath":    BasePath,
+			"title":           "Gruppe " + groupName,
+			"group":           groupName,
+			"groupStatus":     status,
+			"pools":           pools,
+			"poolsTotal":      poolsTotal,
+			"poolsFilter":     filter,
+			"poolsPage":       page,
+			"poolsTotalPages": poolsTotalPages,
+			"poolsHasPrev":    page > 1,
+			"poolsHasNext":    page < poolsTotalPages,
+			// html/template hat keine eingebaute Arithmetik - Seitenzahlen
+			// für die Prev/Next-Links deshalb hier statt im Template berechnen.
+			"poolsPrevPage": page - 1,
+			"poolsNextPage": page + 1,
+			"error":           c.Query("error"),
+			"message":         c.Query("message"),
+			"BasePath":        BasePath,
 		}
 		settings, scraperPainActivePools := addAutoBlockContext(ctx, database, autoBlockManager, groupName)
 		statusLabel, statusDetail, statusClass := groupStatusBanner(status, settings, scraperPainActivePools)
@@ -467,9 +556,21 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 		// Der Schwellwert-Modus blockt bei Auslösung immer die komplette
 		// Gruppe (siehe Manager.evaluateThreshold) - bei sehr großen Gruppen
 		// wird die Option daher ausgegraut (siehe auch Manager.Save, das
-		// dieselbe Grenze serverseitig hart durchsetzt).
+		// dieselbe Grenze serverseitig hart durchsetzt). Muss die
+		// UNGEFILTERTE Gesamtzahl der Gruppe verwenden, nicht poolsTotal
+		// (das ist ggf. durch den Suchfilter reduziert) und nicht len(pools)
+		// (nur die aktuelle Seite).
 		maxPools := autoBlockManager.ScraperPainMaxPools()
-		ctx["thresholdGroupTooLarge"] = maxPools > 0 && len(pools) > maxPools
+		groupPoolCount := poolsTotal
+		if filter != "" {
+			groupPoolCount, err = db.CountDistinctPoolNamesInGroup(database, groupName, "")
+			if err != nil {
+				app.LogIt.Debug(fmt.Sprintf("Fehler beim Zählen der Pools für %s: %v", groupName, err))
+				groupPoolCount = poolsTotal
+			}
+		}
+		ctx["thresholdGroupTooLarge"] = maxPools > 0 && groupPoolCount > maxPools
+		ctx["groupPoolCount"] = groupPoolCount
 		c.HTML(http.StatusOK, "group_detail.html", ctx)
 	})
 

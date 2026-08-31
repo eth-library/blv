@@ -337,13 +337,14 @@ zu schwächen.
 ## API
 Ein Bearer-Auth-geschütztes JSON-API steht unter `/api/v1` bereit (Token
 siehe `envFile` oben; ohne konfigurierten Token antwortet das API mit `503`).
-Das API arbeitet ausschließlich auf **Gruppen-Ebene** - einzelne Pools werden
-bewusst nur über die WebUI verwaltet:
+Das API arbeitet auf **Gruppen-Ebene** - einzelne Pool-Einträge (IP-Ebene,
+z. B. eine einzelne IP whitelisten) bleiben bewusst der WebUI vorbehalten:
 ```
 GET  /api/v1/groups/:name              Status abfragen (blocked/whitelisted/inaktiv)
 POST /api/v1/groups/:name/block        Gruppe blocken (Export + Reload)
 POST /api/v1/groups/:name/whitelist    Gruppe whitelisten (Export + Reload)
 POST /api/v1/groups/:name/deactivate   Gruppe deaktivieren (weder w noch b, Export + Reload)
+POST /api/v1/groups/:name/pools        .conf-Datei als Pool importieren und der Gruppe zuweisen
 ```
 Eine Deaktivierung entfernt die Gruppe aus beiden Dateien (Whitelist und
 Blocklist) - taucht danach in keiner der beiden mehr auf.
@@ -352,12 +353,33 @@ Blocklist) - taucht danach in keiner der beiden mehr auf.
 enthaltenen Pools) bereits exakt den Zielstatus, wird kein erneuter
 Export/Apache-Reload ausgelöst - der Aufruf kehrt sofort zurück. Das macht
 wiederholte Aufrufe billig, z. B. aus einem Skript, das eine Gruppe blockt,
-solange eine Rate-Schwelle überschritten bleibt.
+solange eine Rate-Schwelle überschritten bleibt. Jede der drei Aktionen
+schaltet außerdem ein evtl. für die Gruppe laufendes AutoBlock komplett ab
+(nicht nur den aktuellen Block) - AutoBlock und manuelle Aktionen schließen
+sich gegenseitig aus, siehe Abschnitt AutoBlock oben.
 
-Beispiel:
+**`POST /api/v1/groups/:name/pools`** entspricht dem WebUI-Formular "Datei in
+diese Gruppe hochladen": `multipart/form-data` mit Feld `file` (die
+`.conf`/`.txt`-Datei, Format wie beim WebUI-Upload - `Require [not] ip`-
+Zeilen bzw. einfache IP-Listen). Der Poolname ergibt sich aus dem
+Dateinamen ohne Endung, lässt sich aber über das optionale Feld `poolName`
+überschreiben. Optionales Feld `status` (`w`, `b` oder leer/weggelassen für
+inaktiv) setzt den Status aller importierten Einträge. Existiert der
+Poolname bereits (auch in einer anderen Gruppe), werden die neuen Einträge
+ergänzt und der **gesamte** Pool dieser Gruppe zugewiesen (verschiebt ihn
+also, statt ihn zu duplizieren). Löst bewusst **keinen** Export/Apache-Reload
+aus - dafür anschließend `block`/`whitelist`/`deactivate` aufrufen.
+
+Beispiele:
 ```bash
 curl -H "Authorization: Bearer <API_TOKEN>" https://.../api/v1/groups/Scraping-Netz
 curl -H "Authorization: Bearer <API_TOKEN>" -X POST https://.../api/v1/groups/Scraping-Netz/block
+
+# Pool aus einer .conf-Datei importieren und der Gruppe zuweisen (Status "b" = blocked)
+curl -H "Authorization: Bearer <API_TOKEN>" \
+     -F "file=@./scraper_netzwerke/NEXT-TV_SHPK.conf" \
+     -F "status=b" \
+     -X POST https://.../api/v1/groups/Scraping-Netz/pools
 ```
 
 ## start/stop

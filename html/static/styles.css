@@ -29,6 +29,17 @@ header {
   background: #ffffff;
 }
 
+@media (min-width: 700px) {
+  /* Header bleibt beim Scrollen sichtbar - auf schmalen Viewports (Grid
+     ohnehin einspaltig, siehe .grid unten) unnötig und würde nur Platz
+     kosten, deshalb an denselben Breakpoint gekoppelt. */
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+}
+
 .container {
   max-width: 1200px;
   margin: 0 auto;
@@ -170,6 +181,25 @@ button[type="submit"]:hover {
     gap: 1.5rem;
     align-items: start;
   }
+
+  /* min-width: 0 verhindert, dass eine Spalte durch nicht umbrechenden
+     Inhalt (z. B. sehr lange Pool-Namen) über ihren Grid-Track hinaus
+     wächst und dabei die andere Spalte verdrängt - ein klassischer
+     CSS-Grid-Stolperstein (Grid-Items sind per Default min-width: auto). */
+  .grid-left,
+  .grid-right {
+    min-width: 0;
+  }
+
+  /* Header + linke Spalte (Konfiguration) bleiben beim Durchscrollen einer
+     langen Pools-Tabelle in der rechten Spalte stehen. top passt zur
+     gerenderten Höhe des Headers (h1 + Innenabstand + Rand); .grid mit
+     align-items: start sorgt dafür, dass die Spalte nicht auf die volle
+     Zeilenhöhe gestreckt wird und sich so überhaupt "lösen" kann. */
+  .grid-left {
+    position: sticky;
+    top: 4rem;
+  }
 }
 
 .container-wide {
@@ -206,6 +236,7 @@ button[type="submit"]:hover {
   padding: 0.5rem 0.75rem;
   border-bottom: 1px solid var(--border);
   text-align: left;
+  overflow-wrap: anywhere;
 }
 
 .data-table thead th {
@@ -220,6 +251,30 @@ button[type="submit"]:hover {
 .table-empty {
   text-align: center;
   color: var(--muted);
+}
+
+/* Filter/Pagination (Pools-Tabelle, Gruppen-Detailseite) */
+
+.pools-filter {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.pools-filter .field-group {
+  flex: 1;
+  min-width: 180px;
+  margin-bottom: 0;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
 }
 
 /* Status-Banner (Gruppen-Detailseite) */
