@@ -229,7 +229,7 @@ autoBlock:
   measureIntervalSeconds: 30   # y: wie oft neu gemessen/geprüft wird
   measureWindowMinutes: 10     # x: gleitendes Zeitfenster des Durchschnitts
   thresholdVariancePercent: 30 # +- Zufallsanteil auf den je Gruppe konfigurierten Schwellwert
-  scraperPainMaxPools: 500     # Obergrenze für Scraper's Pain UND max. Gruppengröße für den Schwellwert-Modus, siehe unten
+  maxRequireLines: 50000       # Obergrenze für Scraper's Pain UND max. Gruppengröße (Einträge) für den Schwellwert-Modus, siehe unten
 ```
 Ein leerer `statusURL` deaktiviert nur den Schwellwert-Modus (kein Overhead,
 die Option ist im WebUI ausgegraut) - Scraper's Pain bleibt davon unberührt
@@ -270,14 +270,15 @@ Dauer daraus gewählt). Intern (DB, Auswertung) wird die Blockdauer
 weiterhin in Sekunden gehalten - die Umrechnung erfolgt ausschließlich an
 der WebUI-Formulargrenze.
 
-Für Gruppen mit mehr Pools als `scraperPainMaxPools` (Default 500) ist der
+Für Gruppen mit mehr Einträgen als `maxRequireLines` (Default 50000) ist der
 Schwellwert-Modus **nicht aktivierbar** (Option im WebUI ausgegraut, Server
 lehnt einen direkten API-/Formular-Versuch ebenfalls ab): er blockt bei
 Auslösung immer die komplette Gruppe, und eine so große Blockliste würde den
 in der Praxis beobachteten sehr langen Apache-Reload auslösen (Apache parst
 `Require [not] ip`-Direktiven beim Reload, nicht pro Request - die
-Reload-Dauer hängt also an der Zeilenzahl). Für solche Gruppen bleibt nur
-Scraper's Pain nutzbar, das die Blockmenge selbst begrenzt (siehe unten).
+Reload-Dauer hängt also an der Zeilenzahl, nicht an der Zahl der Pools). Für
+solche Gruppen bleibt nur Scraper's Pain nutzbar, das die Blockmenge selbst
+begrenzt (siehe unten).
 
 Egal welcher Modus: es darf **immer nur eine einzige Gruppe gleichzeitig**
 AutoBlock aktiviert haben. Im Schwellwert-Modus, weil die Ratenmessung
@@ -322,17 +323,23 @@ Sehr kurze Blockdauern (wenige Sekunden/Minuten) führen zu entsprechend
 häufigen Export- und Apache-Reload-Vorgängen - für den produktiven Einsatz
 empfiehlt sich eine Blockdauer-Spanne im Minuten- bis Stunden-Bereich.
 
-**`scraperPainMaxPools`** deckelt zusätzlich, wie viele Pools ein einzelner
-Zyklus höchstens gleichzeitig blockt - unabhängig vom konfigurierten Umfang
-in %. Grund: Apache parst `Require [not] ip`-Direktiven beim Reload (nicht
-pro Request), die Reload-Dauer hängt also an der Zahl der Direktiven in der
-exportierten `.conf`-Datei, nicht an der Gruppengröße selbst. Bei sehr
-großen Gruppen (mehrere tausend Pools) würde ein hoher Umfang-Prozentsatz
-sonst bei jedem Zyklus eine entsprechend große, langsam zu ladende Blockliste
-erzeugen. `0` oder ein negativer Wert deaktiviert die Grenze. Der
+**`maxRequireLines`** deckelt zusätzlich, wie viele `Require not ip`-Zeilen
+ein einzelner Zyklus höchstens gleichzeitig blockt - unabhängig vom
+konfigurierten Umfang in %. Grund: Apache parst `Require [not] ip`-
+Direktiven beim Reload (nicht pro Request), die Reload-Dauer hängt also an
+der Zahl der Direktiven in der exportierten `.conf`-Datei, nicht an der
+Anzahl der Pools selbst - Pools sind unterschiedlich groß, ein Limit auf
+reine Pool-Anzahl sagt also nichts über die tatsächliche Zeilenzahl aus.
+Innerhalb des gewürfelten Umfangs werden deshalb ganze Pools aufaddiert, bis
+das Budget erreicht ist; der letzte noch passende Pool wird dabei nur
+teilweise geblockt (mit so vielen Einträgen, wie das Budget noch hergibt),
+alle danach folgenden Pools des Umfangs bleiben inaktiv. In der Praxis haben
+sich Blocklisten mit bis zu ca. 70000 Zeilen als für Apache noch gut
+handhabbar erwiesen. `0` oder ein negativer Wert deaktiviert die Grenze. Der
 Schwellwert-Modus ist von dieser Grenze **nicht** betroffen - er blockt bei
 Auslösung bewusst immer die komplette Gruppe, um den Scraping-Schutz nicht
-zu schwächen.
+zu schwächen (er wird stattdessen für zu große Gruppen komplett deaktiviert,
+siehe oben).
 
 ## API
 Ein Bearer-Auth-geschütztes JSON-API steht unter `/api/v1` bereit (Token

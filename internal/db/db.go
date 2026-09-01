@@ -647,6 +647,29 @@ func BlockPool(dbConn *sql.DB, poolName string) error {
 	return err
 }
 
+// BlockPoolPartial blockt nur die ersten maxEntries Einträge eines Pools
+// (nach id, also Einfügereihenfolge) und setzt den Rest des Pools explizit
+// auf inaktiv zurück - für den zuletzt eingefügten Pool eines Scraper's-
+// Pain-Zyklus, dessen komplette Größe das konfigurierte maxRequireLines-
+// Budget überschreiten würde (siehe internal/autoblock.startScraperPainCycle).
+// Wie BlockPool überschreibt das auch individuell whitelistete Einträge
+// dieses Pools.
+func BlockPoolPartial(dbConn *sql.DB, poolName string, maxEntries int) error {
+	tx, err := dbConn.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`UPDATE pools SET status = '' WHERE name = ?`, poolName); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE pools SET status = 'b' WHERE id IN (SELECT id FROM pools WHERE name = ? ORDER BY id LIMIT ?)`, poolName, maxEntries); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // DeactivatePool setzt den Status aller Einträge eines Pools zurück auf
 // inaktiv (weder whitelisted noch blocked). Kein Konflikt möglich (im
 // Gegensatz zu WhitelistPool), da eine Deaktivierung nie eine anderswo
@@ -1057,13 +1080,23 @@ func ClearScraperPainActivePools(dbConn *sql.DB, groupName string) error {
 	return err
 }
 
-// ListPoolNamesInGroupExcludingWhitelisted liefert die Pool-Namen einer
-// Gruppe, die nicht individuell vollständig whitelisted sind (alle Einträge
-// Status "w") - Kandidaten für Scraper's Pain (siehe internal/autoblock):
-// ein individuell whitelisteter Pool wird nie automatisch geblockt, analog
-// dazu, dass eine whitelisted Gruppe im Schwellwert-Modus nie automatisch
-// geblockt wird.
-func ListPoolNamesInGroupExcludingWhitelisted(dbConn *sql.DB, groupName string) ([]string, error) {
+// PoolCandidate ist ein Pool samt Gesamtgröße (Anzahl Einträge, unabhängig
+// vom Status) - Grundlage für die Zeilen-basierte Auswahl in Scraper's Pain
+// (siehe internal/autoblock.startScraperPainCycle), da genau diese Zahl an
+// "Require not ip"-Zeilen im Blocklist-Export entsteht, sobald der Pool
+// vollständig geblockt wird (BlockPool setzt ALLE Einträge auf "b").
+type PoolCandidate struct {
+	Name string
+	Size int
+}
+
+// ListPoolCandidatesForScraperPain liefert die Pools einer Gruppe, die nicht
+// individuell vollständig whitelisted sind (alle Einträge Status "w") -
+// Kandidaten für Scraper's Pain (siehe internal/autoblock): ein individuell
+// whitelisteter Pool wird nie automatisch geblockt, analog dazu, dass eine
+// whitelistete Gruppe im Schwellwert-Modus nie automatisch geblockt wird.
+// Zusätzlich zum Namen liefert jeder Kandidat seine Gesamt-Eintragszahl.
+func ListPoolCandidatesForScraperPain(dbConn *sql.DB, groupName string) ([]PoolCandidate, error) {
 	entries, err := ListByGroup(dbConn, groupName)
 	if err != nil {
 		return nil, err
@@ -1083,13 +1116,23 @@ func ListPoolNamesInGroupExcludingWhitelisted(dbConn *sql.DB, groupName string) 
 			c.w++
 		}
 	}
-	var names []string
+	var candidates []PoolCandidate
 	for _, name := range order {
 		if c := byName[name]; c.w != c.total {
-			names = append(names, name)
+			candidates = append(candidates, PoolCandidate{Name: name, Size: c.total})
 		}
 	}
-	return names, nil
+	return candidates, nil
+}
+
+// CountEntriesInGroup liefert die Gesamtzahl aller Einträge einer Gruppe
+// (unabhängig vom Status) - das ist die Zeilenzahl, die ein voller
+// Gruppen-Block (Schwellwert-Modus) im Blocklist-Export erzeugen würde,
+// siehe app.AutoBlockConfig.MaxRequireLines.
+func CountEntriesInGroup(dbConn *sql.DB, groupName string) (int, error) {
+	var count int
+	err := dbConn.QueryRow(`SELECT COUNT(*) FROM pools WHERE group_name = ?`, groupName).Scan(&count)
+	return count, err
 }
 
 func boolToInt(b bool) int {

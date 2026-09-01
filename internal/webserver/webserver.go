@@ -177,7 +177,7 @@ func addAutoBlockContext(ctx gin.H, database *sql.DB, autoBlockManager *autobloc
 	}
 	ctx["autoBlockVariancePercent"] = app.Config.AutoBlock.ThresholdVariancePercent
 	ctx["autoBlockWindowMinutes"] = app.Config.AutoBlock.MeasureWindowMinutes
-	ctx["scraperPainMaxPools"] = autoBlockManager.ScraperPainMaxPools()
+	ctx["maxRequireLines"] = autoBlockManager.MaxRequireLines()
 	settings, err := db.GetAutoBlockSettings(database, groupName)
 	if err != nil {
 		app.LogIt.Debug(fmt.Sprintf("Fehler beim Laden der AutoBlock-Einstellung für %s: %v", groupName, err))
@@ -554,13 +554,13 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 		ctx["statusDetail"] = statusDetail
 		ctx["statusClass"] = statusClass
 		// Der Schwellwert-Modus blockt bei Auslösung immer die komplette
-		// Gruppe (siehe Manager.evaluateThreshold) - bei sehr großen Gruppen
-		// wird die Option daher ausgegraut (siehe auch Manager.Save, das
-		// dieselbe Grenze serverseitig hart durchsetzt). Muss die
-		// UNGEFILTERTE Gesamtzahl der Gruppe verwenden, nicht poolsTotal
-		// (das ist ggf. durch den Suchfilter reduziert) und nicht len(pools)
-		// (nur die aktuelle Seite).
-		maxPools := autoBlockManager.ScraperPainMaxPools()
+		// Gruppe (siehe Manager.evaluateThreshold) - bei sehr vielen
+		// Einträgen wird die Option daher ausgegraut (siehe auch
+		// Manager.Save, das dieselbe Grenze serverseitig hart durchsetzt).
+		// Muss die UNGEFILTERTE Gesamtzahl der Gruppe verwenden, nicht
+		// poolsTotal (das ist ggf. durch den Suchfilter reduziert) und nicht
+		// len(pools) (nur die aktuelle Seite).
+		maxRequireLines := autoBlockManager.MaxRequireLines()
 		groupPoolCount := poolsTotal
 		if filter != "" {
 			groupPoolCount, err = db.CountDistinctPoolNamesInGroup(database, groupName, "")
@@ -569,8 +569,14 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 				groupPoolCount = poolsTotal
 			}
 		}
-		ctx["thresholdGroupTooLarge"] = maxPools > 0 && groupPoolCount > maxPools
+		groupEntryCount, err := db.CountEntriesInGroup(database, groupName)
+		if err != nil {
+			app.LogIt.Debug(fmt.Sprintf("Fehler beim Zählen der Einträge für %s: %v", groupName, err))
+			groupEntryCount = 0
+		}
+		ctx["thresholdGroupTooLarge"] = maxRequireLines > 0 && groupEntryCount > maxRequireLines
 		ctx["groupPoolCount"] = groupPoolCount
+		ctx["groupEntryCount"] = groupEntryCount
 		c.HTML(http.StatusOK, "group_detail.html", ctx)
 	})
 
@@ -684,6 +690,7 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 			mode = autoblock.ModeThreshold
 		}
 		enabled := c.PostForm("enabled") != ""
+		app.LogIt.Debug(fmt.Sprintf("AutoBlock %s: Formular empfangen: enabled=%v mode=%s thresholdRPS=%q scraperPainPercent=%q minMin=%q maxMin=%q", groupName, enabled, mode, c.PostForm("thresholdRPS"), c.PostForm("scraperPainPercent"), c.PostForm("blockDurationMinMinutes"), c.PostForm("blockDurationMaxMinutes")))
 
 		thresholdRPS, errT := strconv.ParseFloat(strings.TrimSpace(c.PostForm("thresholdRPS")), 64)
 		if errT != nil && existing != nil {
@@ -708,6 +715,7 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 		}
 
 		if !valid {
+			app.LogIt.Debug(fmt.Sprintf("AutoBlock %s: Formularwerte ungültig (errT=%v errP=%v errMin=%v errMax=%v minMinutes=%d maxMinutes=%d)", groupName, errT, errP, errMin, errMax, minMinutes, maxMinutes))
 			if enabled {
 				errMsg := "Ungültige AutoBlock-Werte (0 < Blockdauer-Min <= Blockdauer-Max erforderlich"
 				if mode == autoblock.ModeThreshold {
@@ -722,18 +730,22 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 			// geleert): bestehende Konfiguration unangetastet lassen, nur
 			// stoppen/zurücksetzen und den enabled-Flag umschalten.
 			if err := autoBlockManager.Stop(groupName); err != nil {
+				app.LogIt.Error(fmt.Sprintf("AutoBlock %s: Stop fehlgeschlagen: %v", groupName, err))
 				c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape(err.Error()))
 				return
 			}
 			if err := db.SetAutoBlockEnabled(database, groupName, false); err != nil {
+				app.LogIt.Error(fmt.Sprintf("AutoBlock %s: SetAutoBlockEnabled(false) fehlgeschlagen: %v", groupName, err))
 				c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape(err.Error()))
 				return
 			}
+			app.LogIt.Info(fmt.Sprintf("AutoBlock %s: über Formular deaktiviert (ungültige Restwerte, nur enabled-Flag umgeschaltet)", groupName))
 			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?message="+url.QueryEscape("AutoBlock deaktiviert."))
 			return
 		}
 
 		if err := autoBlockManager.Save(groupName, enabled, mode, thresholdRPS, scraperPainPercent, minSeconds, maxSeconds); err != nil {
+			app.LogIt.Error(fmt.Sprintf("AutoBlock %s: Save fehlgeschlagen (enabled=%v mode=%s): %v", groupName, enabled, mode, err))
 			c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?error="+url.QueryEscape(err.Error()))
 			return
 		}
@@ -741,6 +753,7 @@ func NewRouter(database *sql.DB, BasePath string, autoBlockManager *autoblock.Ma
 		if enabled {
 			message = "AutoBlock aktiviert."
 		}
+		app.LogIt.Info(fmt.Sprintf("AutoBlock %s: über Formular gespeichert (enabled=%v mode=%s)", groupName, enabled, mode))
 		c.Redirect(http.StatusSeeOther, BasePath+"/admin/groups/"+groupName+"?message="+url.QueryEscape(message))
 	})
 

@@ -35,7 +35,7 @@ type Manager struct {
 	monitor         *RateMonitor
 	interval        time.Duration
 	variancePercent int
-	scraperPainMax  int
+	maxRequireLines int
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
@@ -48,15 +48,15 @@ func NewManager(ctx context.Context, database *sql.DB, monitor *RateMonitor, cfg
 		monitor:         monitor,
 		interval:        time.Duration(cfg.MeasureIntervalSeconds) * time.Second,
 		variancePercent: cfg.ThresholdVariancePercent,
-		scraperPainMax:  cfg.ScraperPainMaxPools,
+		maxRequireLines: cfg.MaxRequireLines,
 		cancels:         make(map[string]context.CancelFunc),
 	}
 }
 
-// ScraperPainMaxPools gibt das konfigurierte Limit zurück (0/negativ = kein
+// MaxRequireLines gibt das konfigurierte Limit zurück (0/negativ = kein
 // Limit) - z. B. für die Live-Anzeige im WebUI (siehe addAutoBlockContext).
-func (m *Manager) ScraperPainMaxPools() int {
-	return m.scraperPainMax
+func (m *Manager) MaxRequireLines() int {
+	return m.maxRequireLines
 }
 
 // Monitor gibt den zugrundeliegenden RateMonitor zurück (z. B. für die
@@ -116,17 +116,18 @@ func (m *Manager) Save(groupName string, enabled bool, mode string, thresholdRPS
 		}
 		// Der Schwellwert-Modus blockt bei Auslösung immer die komplette
 		// Gruppe (siehe evaluateThreshold/functions.BlockGroup) - bei sehr
-		// großen Gruppen würde das denselben zu langen Apache-Reload
-		// auslösen, den scraperPainMax für Scraper's Pain gerade begrenzt.
+		// vielen Einträgen würde das denselben zu langen Apache-Reload
+		// auslösen, den maxRequireLines für Scraper's Pain gerade begrenzt.
 		// Dasselbe Limit gilt daher auch hier als Obergrenze für die
-		// Gruppengröße, nicht als Obergrenze für die Blockmenge.
-		if mode == ModeThreshold && m.scraperPainMax > 0 {
-			poolNames, err := db.ListPoolNamesInGroup(m.database, groupName)
+		// Gesamt-Eintragszahl der Gruppe, nicht als Obergrenze für die
+		// Blockmenge.
+		if mode == ModeThreshold && m.maxRequireLines > 0 {
+			entryCount, err := db.CountEntriesInGroup(m.database, groupName)
 			if err != nil {
 				return err
 			}
-			if len(poolNames) > m.scraperPainMax {
-				return fmt.Errorf("Schwellwert-basierter AutoBlock ist für Gruppen mit mehr als %d Pools deaktiviert (aktuell %d Pools) - der volle Gruppen-Block würde einen zu langen Apache-Reload auslösen. Nutzen Sie stattdessen Scraper's Pain", m.scraperPainMax, len(poolNames))
+			if entryCount > m.maxRequireLines {
+				return fmt.Errorf("Schwellwert-basierter AutoBlock ist für Gruppen mit mehr als %d Einträgen deaktiviert (aktuell %d Einträge) - der volle Gruppen-Block würde einen zu langen Apache-Reload auslösen. Nutzen Sie stattdessen Scraper's Pain", m.maxRequireLines, entryCount)
 			}
 		}
 		enabledGroup, found, err := db.GetEnabledAutoBlockGroup(m.database)
@@ -339,8 +340,14 @@ func (m *Manager) evaluateScraperPain(groupName string, settings *db.AutoBlockSe
 // bleibt dabei durchgängig "" - es ist immer nur ein Teil der Pools
 // geblockt, nie die ganze Gruppe (siehe poolSummariesForGroup im WebUI, das
 // das bereits als "gemischt/inaktiv" darstellt).
+//
+// Innerhalb des gewürfelten Umfangs (scope) werden ganze Pools aufaddiert,
+// bis das maxRequireLines-Budget erreicht ist (siehe packPoolsByLines) - der
+// letzte noch (teilweise) passende Pool wird dabei nur mit so vielen
+// Einträgen geblockt, wie das Budget noch hergibt, alle danach folgenden
+// Pools des scope bleiben inaktiv.
 func (m *Manager) startScraperPainCycle(groupName string, settings *db.AutoBlockSettings) {
-	candidates, err := db.ListPoolNamesInGroupExcludingWhitelisted(m.database, groupName)
+	candidates, err := db.ListPoolCandidatesForScraperPain(m.database, groupName)
 	if err != nil {
 		app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Pools konnten nicht gelesen werden: %v", groupName, err))
 		return
@@ -350,10 +357,17 @@ func (m *Manager) startScraperPainCycle(groupName string, settings *db.AutoBlock
 		return
 	}
 
-	count := scraperPainCount(len(candidates), settings.ScraperPainPercent, m.scraperPainMax)
-	uncappedCount := scraperPainCount(len(candidates), settings.ScraperPainPercent, 0)
 	rand.Shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
-	selected := candidates[:count]
+	scopeCount := scraperPainScopeCount(len(candidates), settings.ScraperPainPercent)
+	scope := candidates[:scopeCount]
+
+	fullyBlocked, partialPool, partialLines, blockedLines := packPoolsByLines(scope, m.maxRequireLines)
+
+	selected := make([]string, 0, len(fullyBlocked)+1)
+	selected = append(selected, fullyBlocked...)
+	if partialPool != "" {
+		selected = append(selected, partialPool)
+	}
 	stillSelected := make(map[string]bool, len(selected))
 	for _, poolName := range selected {
 		stillSelected[poolName] = true
@@ -365,16 +379,22 @@ func (m *Manager) startScraperPainCycle(groupName string, settings *db.AutoBlock
 	// "vorher") ein Pool, der zufällig nicht zu den Erst-Kandidaten gehörte
 	// aber z. B. noch von der Neuanlage her als "b" markiert war, fälschlich
 	// dauerhaft geblockt statt nur die gewürfelte Auswahl.
-	for _, poolName := range candidates {
-		if !stillSelected[poolName] {
-			if err := db.DeactivatePool(m.database, poolName); err != nil {
-				app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Pool %s konnte nicht freigegeben werden: %v", groupName, poolName, err))
+	for _, c := range candidates {
+		if !stillSelected[c.Name] {
+			if err := db.DeactivatePool(m.database, c.Name); err != nil {
+				app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Pool %s konnte nicht freigegeben werden: %v", groupName, c.Name, err))
 			}
 		}
 	}
-	for _, poolName := range selected {
+	for _, poolName := range fullyBlocked {
 		if err := db.BlockPool(m.database, poolName); err != nil {
 			app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Pool %s konnte nicht geblockt werden: %v", groupName, poolName, err))
+			return
+		}
+	}
+	if partialPool != "" {
+		if err := db.BlockPoolPartial(m.database, partialPool, partialLines); err != nil {
+			app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Pool %s konnte nicht teilweise geblockt werden: %v", groupName, partialPool, err))
 			return
 		}
 	}
@@ -393,21 +413,24 @@ func (m *Manager) startScraperPainCycle(groupName string, settings *db.AutoBlock
 	} else if reloadErr != nil {
 		app.LogIt.Error(fmt.Sprintf("Scraper's Pain %s: Apache-Reload fehlgeschlagen: %v", groupName, reloadErr))
 	}
+
 	capNote := ""
-	if count < uncappedCount {
-		capNote = fmt.Sprintf(" (Umfang wäre %d gewesen, auf scraperPainMaxPools=%d begrenzt)", uncappedCount, m.scraperPainMax)
+	if len(selected) < len(scope) {
+		scopeLines := 0
+		for _, c := range scope {
+			scopeLines += c.Size
+		}
+		capNote = fmt.Sprintf(" (Umfang wäre %d Pools/%d Zeilen gewesen, auf maxRequireLines=%d begrenzt)", len(scope), scopeLines, m.maxRequireLines)
 	}
-	app.LogIt.Info(fmt.Sprintf("Scraper's Pain %s: %d von %d Pools geblockt bis %s%s", groupName, len(selected), len(candidates), until.Format(time.RFC3339), capNote))
+	app.LogIt.Info(fmt.Sprintf("Scraper's Pain %s: %d von %d Pools geblockt (%d Zeilen) bis %s%s", groupName, len(selected), len(candidates), blockedLines, until.Format(time.RFC3339), capNote))
 }
 
-// scraperPainCount rechnet den konfigurierten Prozentanteil in eine
+// scraperPainScopeCount rechnet den konfigurierten Prozentanteil in eine
 // konkrete Pool-Anzahl um: aufgerundet, mindestens 1 (sofern Kandidaten
-// vorhanden), höchstens alle Kandidaten - und danach zusätzlich auf maxPools
-// gedeckelt (0/negativ = kein Limit). Der Deckel schützt vor sehr langen
-// Apache-Reloads bei sehr großen Gruppen: die Reload-Dauer hängt an der Zahl
-// der Require-Direktiven in der exportierten .conf-Datei, siehe
-// app.AutoBlockConfig.ScraperPainMaxPools.
-func scraperPainCount(total, percent, maxPools int) int {
+// vorhanden), höchstens alle Kandidaten. Das zeilenbasierte Budget
+// (maxRequireLines) wird erst danach beim Aufaddieren der Pool-Größen
+// angewendet, siehe packPoolsByLines.
+func scraperPainScopeCount(total, percent int) int {
 	if total <= 0 {
 		return 0
 	}
@@ -418,10 +441,45 @@ func scraperPainCount(total, percent, maxPools int) int {
 	if count > total {
 		count = total
 	}
-	if maxPools > 0 && count > maxPools {
-		count = maxPools
-	}
 	return count
+}
+
+// packPoolsByLines addiert die Größen der (bereits zufällig sortierten) Pools
+// in Reihenfolge auf, bis das Zeilenbudget maxLines erreicht ist: ganze Pools
+// werden übernommen, solange das Budget reicht. Passt der nächste Pool nicht
+// mehr vollständig, wird er als partial zurückgegeben und nur mit den noch
+// verbleibenden Zeilen (partialLines) geblockt - alle danach folgenden Pools
+// bleiben unberücksichtigt. maxLines <= 0 bedeutet "kein Limit": dann werden
+// alle Pools vollständig übernommen. partial ist "", wenn kein Pool nur
+// teilweise geblockt wird (Budget reicht exakt oder ist größer als scope).
+// blockedLines ist die Gesamtzahl der dadurch geblockten Zeilen (Summe der
+// fullyBlocked-Größen plus partialLines).
+func packPoolsByLines(pools []db.PoolCandidate, maxLines int) (fullyBlocked []string, partial string, partialLines int, blockedLines int) {
+	if maxLines <= 0 {
+		fullyBlocked = make([]string, len(pools))
+		for i, p := range pools {
+			fullyBlocked[i] = p.Name
+			blockedLines += p.Size
+		}
+		return fullyBlocked, "", 0, blockedLines
+	}
+
+	remaining := maxLines
+	for _, p := range pools {
+		if p.Size <= remaining {
+			fullyBlocked = append(fullyBlocked, p.Name)
+			remaining -= p.Size
+			continue
+		}
+		if remaining > 0 {
+			partial = p.Name
+			partialLines = remaining
+			remaining = 0
+		}
+		break
+	}
+	blockedLines = maxLines - remaining
+	return fullyBlocked, partial, partialLines, blockedLines
 }
 
 // revertMode beendet einen laufenden automatischen Block modusabhängig: im

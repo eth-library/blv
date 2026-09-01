@@ -54,7 +54,7 @@
               <p class="hint">Schwellwert-basierter Block ist nicht verfügbar (keine statusURL in der fairDB-Config) - Scraper's Pain funktioniert unabhängig davon.</p>
             {{ end }}
             {{ if .thresholdGroupTooLarge }}
-              <p class="hint">Schwellwert-basierter Block ist für diese Gruppe deaktiviert ({{ len .pools }} Pools, Grenze {{ .scraperPainMaxPools }}) - er würde bei Auslösung die komplette Gruppe blocken und einen zu langen Apache-Reload auslösen. Nutzen Sie stattdessen Scraper's Pain.</p>
+              <p class="hint">Schwellwert-basierter Block ist für diese Gruppe deaktiviert ({{ .groupEntryCount }} Einträge, Grenze {{ .maxRequireLines }}) - er würde bei Auslösung die komplette Gruppe blocken und einen zu langen Apache-Reload auslösen. Nutzen Sie stattdessen Scraper's Pain.</p>
             {{ end }}
             {{ with .autoBlockMonitor }}
               <p>
@@ -135,9 +135,22 @@
                   var scraperPain = document.getElementById('abModeScraperPain').checked;
                   document.getElementById('abThresholdGroup').style.display = scraperPain ? 'none' : '';
                   document.getElementById('abScraperPainGroup').style.display = scraperPain ? '' : 'none';
+                  // Ein via display:none verstecktes Feld bleibt für die native
+                  // HTML5-Validierung trotzdem "sichtbar" - ist es dabei ungültig
+                  // (z. B. thresholdRPS=0 bei min=1, weil die Gruppe noch nie im
+                  // Schwellwert-Modus konfiguriert war), kann der Browser es beim
+                  // Absenden nicht fokussieren und bricht das Submit komplett und
+                  // stillschweigend ab (Konsole: "An invalid form control ... is
+                  // not focusable"). disabled statt nur versteckt nimmt das
+                  // jeweils inaktive Feld sowohl aus der Validierung als auch aus
+                  // der Formular-Übermittlung heraus - der Server füllt einen so
+                  // fehlenden Wert ohnehin aus den bestehenden Einstellungen auf.
+                  document.getElementById('abThreshold').disabled = scraperPain;
+                  document.getElementById('abScraperPainPercent').disabled = !scraperPain;
                 };
                 var totalPools = {{ .groupPoolCount }};
-                var scraperPainMaxPools = {{ .scraperPainMaxPools }};
+                var totalEntries = {{ .groupEntryCount }};
+                var maxRequireLines = {{ .maxRequireLines }};
                 window.fairdbUpdateScraperPainCount = function () {
                   var input = document.getElementById('abScraperPainPercent');
                   var out = document.getElementById('abScraperPainCount');
@@ -149,9 +162,17 @@
                   var count = Math.ceil(totalPools * percent / 100);
                   if (count < 1) count = 1;
                   if (count > totalPools) count = totalPools;
-                  var capped = scraperPainMaxPools > 0 && count > scraperPainMaxPools;
-                  if (capped) count = scraperPainMaxPools;
-                  out.textContent = '≈ ' + count + ' von ' + totalPools + ' Pools (individuell whitelistete Pools zählen nicht mit)' + (capped ? ' - begrenzt durch scraperPainMaxPools=' + scraperPainMaxPools : '');
+                  // Ganze Pools werden aufaddiert, bis maxRequireLines erreicht ist
+                  // (der letzte passende Pool wird dann nur teilweise geblockt) -
+                  // die durchschnittliche Poolgröße liefert nur eine Schätzung,
+                  // da die tatsächliche Auswahl zufällig ist und Pools
+                  // unterschiedlich groß sind.
+                  var avgLinesPerPool = totalPools > 0 ? totalEntries / totalPools : 0;
+                  var estimatedLines = Math.round(count * avgLinesPerPool);
+                  var capped = maxRequireLines > 0 && avgLinesPerPool > 0 && estimatedLines > maxRequireLines;
+                  if (capped) count = Math.max(1, Math.floor(maxRequireLines / avgLinesPerPool));
+                  var lineNote = avgLinesPerPool > 0 ? ' (≈ ' + Math.min(estimatedLines, maxRequireLines > 0 ? maxRequireLines : estimatedLines) + ' Zeilen)' : '';
+                  out.textContent = '≈ ' + count + ' von ' + totalPools + ' Pools' + lineNote + ' (individuell whitelistete Pools zählen nicht mit, letzter Pool ggf. nur teilweise geblockt)' + (capped ? ' - Zeilenbudget maxRequireLines=' + maxRequireLines + ' begrenzt den Umfang' : '');
                 };
                 fairdbUpdateAutoBlockRange();
                 fairdbUpdateAutoBlockMode();

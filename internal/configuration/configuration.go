@@ -56,25 +56,30 @@ type LogConfig struct {
 // internal/autoblock). StatusURL/MeasureIntervalSeconds/MeasureWindowMinutes/
 // ThresholdVariancePercent betreffen nur den Schwellwert-Modus - leerer
 // StatusURL deaktiviert nur diesen Modus (kein RateMonitor), Scraper's Pain
-// bleibt unabhängig davon nutzbar. ScraperPainMaxPools gilt für beide Modi
+// bleibt unabhängig davon nutzbar. MaxRequireLines gilt für beide Modi
 // unabhängig von einer statusURL.
 type AutoBlockConfig struct {
 	StatusURL                string `yaml:"statusURL"`
 	MeasureIntervalSeconds   int    `yaml:"measureIntervalSeconds"`
 	MeasureWindowMinutes     int    `yaml:"measureWindowMinutes"`
 	ThresholdVariancePercent int    `yaml:"thresholdVariancePercent"`
-	// ScraperPainMaxPools begrenzt zweierlei, beides aus demselben Grund:
-	// Apache parst Require-[not]-ip-Direktiven beim Reload (nicht pro
-	// Request), die Reload-Dauer hängt also an der Zahl der Direktiven in
-	// der exportierten .conf-Datei, nicht an der Gruppengröße selbst.
-	//  1. ModeScraperPain: wie viele Pools ein einzelner Zyklus höchstens
-	//     gleichzeitig blockt, unabhängig vom konfigurierten Umfang in %.
-	//  2. ModeThreshold: die maximale Gruppengröße, ab der der Modus
-	//     überhaupt aktivierbar ist (siehe Manager.Save) - er blockt bei
-	//     Auslösung immer die komplette Gruppe und kann eine Blockliste
-	//     daher nicht wie Scraper's Pain selbst begrenzen.
+	// MaxRequireLines begrenzt zweierlei, beides aus demselben Grund: Apache
+	// parst Require-[not]-ip-Direktiven beim Reload (nicht pro Request), die
+	// Reload-Dauer hängt also an der Zahl der Direktiven in der exportierten
+	// .conf-Datei, nicht an der Gruppengröße (Pool- oder Eintragszahl) selbst.
+	//  1. ModeScraperPain: wie viele "Require not ip"-Zeilen ein einzelner
+	//     Zyklus höchstens gleichzeitig blockt, unabhängig vom konfigurierten
+	//     Umfang in %. Dazu werden ganze Pools aufaddiert, bis das Budget
+	//     erreicht ist; der letzte noch passende Pool wird nur teilweise
+	//     geblockt (siehe Manager.startScraperPainCycle) - Pools sind
+	//     unterschiedlich groß, ein Limit auf Pool-Anzahl allein sagt nichts
+	//     über die tatsächliche Zeilenzahl aus.
+	//  2. ModeThreshold: die maximale Gruppengröße (Gesamt-Eintragszahl), ab
+	//     der der Modus überhaupt aktivierbar ist (siehe Manager.Save) - er
+	//     blockt bei Auslösung immer die komplette Gruppe und kann eine
+	//     Blockliste daher nicht wie Scraper's Pain selbst begrenzen.
 	// 0 oder negativ bedeutet "kein Limit" (beide Fälle).
-	ScraperPainMaxPools int `yaml:"scraperPainMaxPools"`
+	MaxRequireLines int `yaml:"maxRequireLines"`
 }
 
 func Initialize(appName string, cfgPath string) {
@@ -146,7 +151,7 @@ func (config *ApplicationConfig) setDefaults() {
 			MeasureIntervalSeconds:   30,
 			MeasureWindowMinutes:     10,
 			ThresholdVariancePercent: 30,
-			ScraperPainMaxPools:      500,
+			MaxRequireLines:          50000,
 		},
 	}
 }
